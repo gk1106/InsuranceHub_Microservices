@@ -1,11 +1,11 @@
 # Progress
 
-Current phase: **0 — scaffold (done, awaiting review)**
+Current phase: **1 — hub-common (done, awaiting review)**
 
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Scaffold: parent POM, 4 modules, Spotless, JaCoCo, compose (MySQL/Kafka/Keycloak/LGTM), ADR-0001 | Done |
-| 1 | hub-common: HubResponse, HubErrorCode, PiiMasker, correlation filter | Not started |
+| 1 | hub-common: HubResponse, HubErrorCode, PiiMasker, correlation filter | Done |
 | 2 | policy-service 01 create | Not started |
 | 3 | policy-service 02 renew + coverage lookup | Not started |
 | 4 | claims-service 03 register + 04 status | Not started |
@@ -63,3 +63,36 @@ Current phase: **0 — scaffold (done, awaiting review)**
   services' layering tests need `.withOptionalLayers(true)` for now — remove it once each
   service actually has classes in every layer, so an accidentally-empty layer starts failing
   the build again as a real signal.
+
+## Phase 1 notes
+
+- `hub-common` now has real code: `HubErrorCode` (the ~18-entry catalogue from
+  `api-contract.md` §5, `respCode()` derived from `httpStatus()` so they can't drift),
+  `HubBusinessException`, `HubResponse` (the external envelope, `@JsonInclude(NON_NULL)` so a
+  pre-trust failure omits `txnId`/`reqId` entirely — matches `api-contract.md` §4's samples
+  exactly), `HubHeaders`, `CorrelationFilter`, `CorrelationPropagationInterceptor`, `PiiMasker`,
+  and `HubCommonAutoConfiguration` (auto-registers `CorrelationFilter` via
+  `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`). Full
+  reasoning for every class is in the phase-1 plan (see git history / conversation) — not
+  duplicated here.
+- `hub-common` went from zero Spring dependencies to three: `spring-web`,
+  `spring-boot-autoconfigure`, `spring-boot` — deliberate, not scope creep (needed for
+  `HttpStatus`, `@AutoConfiguration`, and `FilterRegistrationBean` respectively).
+- **Two deliberate scope narrowings vs. the literal doc text**, flagged for review:
+  - `CorrelationFilter` only sets MDC keys `reqId`/`inspId`/`txnId` from headers
+    `X-Req-Id`/`X-Insp-Id`/`X-Txn-Id` — narrower than `cross-cutting.md`'s full MDC key list
+    (`traceId, spanId, txnId, reqId, inspId, serviceType`). `traceId`/`spanId` are left to
+    Micrometer's own MDC integration (phase 8, no tracing dependency here yet); `serviceType`
+    isn't known until after the gateway decrypts the body (`service-design.md` §4 step 4),
+    which runs *after* `CorrelationFilter` (step 1), so it has to be set later by gateway
+    dispatch code, not here.
+  - `txnId` generation uses `UUID.randomUUID()` via a pluggable `Supplier<String>` constructor
+    arg — `api-contract.md` §4 calls for a ULID specifically, but no ULID library is in the
+    tree yet. Swap the supplier when the gateway's dispatch/crypto work (phase 5/6) needs the
+    real format.
+- `HubBusinessException` isn't itemized by name in SKILL.md's phase-1 list — added because
+  `cross-cutting.md` §1's error-handling contract requires it verbatim
+  (`HubBusinessException(HubErrorCode code, String safeDetail)`), thrown identically by both
+  domain services against the shared enum.
+- 56 tests, all green: `./mvnw -pl hub-common -am verify` and the full `./mvnw verify` reactor
+  both pass.

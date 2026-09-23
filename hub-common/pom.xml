@@ -38,6 +38,22 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-annotations</artifactId>
     </dependency>
+    <dependency>
+      <!-- ClientHttpRequestInterceptor, and HttpStatus/HttpStatusCode for HubErrorCode. -->
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-web</artifactId>
+    </dependency>
+    <dependency>
+      <!-- @AutoConfiguration, @ConditionalOnClass, @ConditionalOnWebApplication. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <dependency>
+      <!-- FilterRegistrationBean; declared directly rather than relying on it arriving
+           transitively via spring-boot-autoconfigure, since we import its classes directly. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.projectlombok</groupId>
@@ -63,6 +79,19 @@
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Actually serialize HubResponse to assert its JSON shape; jackson-annotations alone
+           can't serialize. -->
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- ApplicationContextRunner, to test HubCommonAutoConfiguration's conditional wiring. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
