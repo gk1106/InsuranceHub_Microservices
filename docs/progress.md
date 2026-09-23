@@ -26,9 +26,8 @@ Current phase: **0 — scaffold (done, awaiting review)**
   layering test (`api -> application -> domain`, `infrastructure` not depended on) — currently
   vacuous since no domain code exists yet, but wired up from day one.
 - `hub-common` has no source files yet on purpose — that's phase 1.
-- JaCoCo's 80% line-coverage gate is configured with `haltOnFailure=false` for now, since there's
-  no domain/application code to measure. **Flip it to enforce (remove/set true) once phase 2
-  adds real domain code** — don't let it silently stay toothless.
+- JaCoCo's 80% line-coverage gate (`**/domain/**`, `**/application/**`) is enforced
+  (`haltOnFailure=true`).
 - `hub-gateway` has a placeholder `SecurityConfig` that only opens up
   `/actuator/health/**` unauthenticated (for the Docker healthcheck) and requires a JWT
   everywhere else; full OAuth2 rules land in phase 5. Local profile points its issuer-uri at

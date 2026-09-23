@@ -151,8 +151,7 @@
                   <include>**/domain/**</include>
                   <include>**/application/**</include>
                 </includes>
-                <!-- No domain/application classes exist yet in phase 0; the rule has nothing to
-                     check until phase 2+ adds them, so it passes trivially until then. -->
+                <!-- Enforced: a real coverage shortfall in domain/application fails the build. -->
                 <haltOnFailure>true</haltOnFailure>
               </configuration>
             </execution>
