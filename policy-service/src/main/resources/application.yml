@@ -32,3 +32,10 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+hub:
+  correlation:
+    # hub-gateway is the only caller (private subnets, security groups) and always sets
+    # X-Req-Id/X-Insp-Id/X-Txn-Id, so it's safe to trust them here. Defaults to false in
+    # hub-common - this must stay explicit.
+    trust-inbound-headers: true

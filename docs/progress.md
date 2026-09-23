@@ -67,32 +67,60 @@ Current phase: **1 — hub-common (done, awaiting review)**
 ## Phase 1 notes
 
 - `hub-common` now has real code: `HubErrorCode` (the ~18-entry catalogue from
-  `api-contract.md` §5, `respCode()` derived from `httpStatus()` so they can't drift),
+  `api-contract.md` §5, `respCode` an explicit stored field — see review note below),
   `HubBusinessException`, `HubResponse` (the external envelope, `@JsonInclude(NON_NULL)` so a
   pre-trust failure omits `txnId`/`reqId` entirely — matches `api-contract.md` §4's samples
   exactly), `HubHeaders`, `CorrelationFilter`, `CorrelationPropagationInterceptor`, `PiiMasker`,
-  and `HubCommonAutoConfiguration` (auto-registers `CorrelationFilter` via
+  `Ulid`, and `HubCommonAutoConfiguration` (auto-registers `CorrelationFilter` via
   `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`). Full
   reasoning for every class is in the phase-1 plan (see git history / conversation) — not
   duplicated here.
 - `hub-common` went from zero Spring dependencies to three: `spring-web`,
   `spring-boot-autoconfigure`, `spring-boot` — deliberate, not scope creep (needed for
   `HttpStatus`, `@AutoConfiguration`, and `FilterRegistrationBean` respectively).
-- **Two deliberate scope narrowings vs. the literal doc text**, flagged for review:
-  - `CorrelationFilter` only sets MDC keys `reqId`/`inspId`/`txnId` from headers
-    `X-Req-Id`/`X-Insp-Id`/`X-Txn-Id` — narrower than `cross-cutting.md`'s full MDC key list
-    (`traceId, spanId, txnId, reqId, inspId, serviceType`). `traceId`/`spanId` are left to
-    Micrometer's own MDC integration (phase 8, no tracing dependency here yet); `serviceType`
-    isn't known until after the gateway decrypts the body (`service-design.md` §4 step 4),
-    which runs *after* `CorrelationFilter` (step 1), so it has to be set later by gateway
-    dispatch code, not here.
-  - `txnId` generation uses `UUID.randomUUID()` via a pluggable `Supplier<String>` constructor
-    arg — `api-contract.md` §4 calls for a ULID specifically, but no ULID library is in the
-    tree yet. Swap the supplier when the gateway's dispatch/crypto work (phase 5/6) needs the
-    real format.
 - `HubBusinessException` isn't itemized by name in SKILL.md's phase-1 list — added because
   `cross-cutting.md` §1's error-handling contract requires it verbatim
   (`HubBusinessException(HubErrorCode code, String safeDetail)`), thrown identically by both
   domain services against the shared enum.
-- 56 tests, all green: `./mvnw -pl hub-common -am verify` and the full `./mvnw verify` reactor
-  both pass.
+- **`CorrelationFilter`'s MDC keys deliberately stay narrower** than `cross-cutting.md`'s full
+  list (`traceId, spanId, txnId, reqId, inspId, serviceType`): `traceId`/`spanId` are left to
+  Micrometer's own MDC integration (phase 8, no tracing dependency here yet); `serviceType`
+  isn't known until after the gateway decrypts the body (`service-design.md` §4 step 4), which
+  runs *after* `CorrelationFilter` (step 1), so it has to be set later by gateway dispatch code.
+
+### Phase 1 review round (2026-09-23)
+
+- **`HubErrorCode.respCode()` is now a stored field**, not derived from `httpStatus()` — they
+  match today (`HubErrorCodeTest.respCodeCurrentlyMatchesHttpStatus`, parameterized over all 19
+  entries) but `docs/open-questions.md` Q1/Q2 may force them apart once the bank answers, and
+  deriving one from the other would have made that impossible to express.
+- **`CorrelationFilter` gained a `trustInboundHeaders` flag** (constructor arg, bound from
+  `hub.correlation.trust-inbound-headers` via the new `CorrelationProperties`, defaulting to
+  `false` - fail-safe): `false` for `hub-gateway` (the insurer's raw request is untrusted;
+  reqId/inspId come from the decrypted body and the validated JWT, never from a header at this
+  point) and `true` for policy-service/claims-service (the gateway is the only caller and always
+  sets all three headers). `policy-service`/`claims-service`/`hub-gateway`'s `application.yml`
+  now set this explicitly rather than relying on the default silently.
+- **Every value entering MDC is sanitized first**: whitelist `[A-Za-z0-9._-]`, cap 64 chars,
+  applied regardless of trust mode (cheap, and closes the gap even for values hub-common
+  generates itself). `CorrelationFilterTest.sanitizesCrlfAndOtherDisallowedCharactersOutOfHeaderValues`
+  proves a CRLF-log-injection attempt in a header value can't reach the log output.
+  `mdcDoesNotLeakBetweenSequentialRequestsOnTheSameThread` proves the `finally` block actually
+  prevents cross-request leakage on a reused worker thread, not just that MDC is empty
+  immediately after one call returns.
+- **`txnId` is now a real ULID**, not a `UUID.randomUUID()` placeholder — hand-rolled Crockford
+  Base32 encoder (`Ulid`, no new dependency), still behind the same `Supplier<String>` seam.
+  Decision, alternatives considered, and the **`CHAR(26)` column type phase 2's Flyway
+  migrations should use** are recorded in `docs/adr/0002-txn-id-format.md`.
+- **Real bug found and fixed**: adding the `CorrelationProperties` parameter to
+  `correlationFilterRegistration()` broke `@ConditionalOnMissingBean`'s return-type deduction
+  under Boot 4.1.1 (`BeanTypeDeductionException` → `ClassNotFoundException` for
+  `HubCommonAutoConfiguration` itself, surfaced only when policy-service/claims-service loaded
+  the full Spring context in their `@SpringBootTest`s - hub-common's own `ApplicationContextRunner`
+  test didn't catch it). Fixed by specifying `@ConditionalOnMissingBean(name =
+  "correlationFilterRegistration")` explicitly instead of relying on deduction.
+- `HubCommonAutoConfiguration` confirmed to already use `@ConditionalOnWebApplication(SERVLET)`
+  and `@ConditionalOnMissingBean` (present since the initial phase-1 implementation).
+- 84 hub-common tests (was 56), all green. Full `./mvnw verify` reactor passes, including
+  policy-service's and claims-service's full `@SpringBootTest` context loads against real
+  Testcontainers MySQL - which is what caught the `@ConditionalOnMissingBean` bug above.

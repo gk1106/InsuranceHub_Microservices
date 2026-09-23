@@ -30,3 +30,8 @@ springdoc:
 hub:
   crypto:
     enabled: true
+  correlation:
+    # Explicit even though it's hub-common's default: the insurer's raw request is untrusted
+    # input, so reqId/inspId must never come from headers here - only from the decrypted body
+    # and the validated JWT, set into MDC by gateway-specific code later in the pipeline.
+    trust-inbound-headers: false

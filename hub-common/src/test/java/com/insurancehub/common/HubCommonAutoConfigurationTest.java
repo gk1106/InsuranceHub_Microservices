@@ -25,6 +25,33 @@ class HubCommonAutoConfigurationTest {
   }
 
   @Test
+  void defaultsToNotTrustingInboundHeaders() {
+    new WebApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(HubCommonAutoConfiguration.class))
+        .run(
+            context -> {
+              FilterRegistrationBean<?> registration =
+                  context.getBean(FilterRegistrationBean.class);
+              CorrelationFilter filter = (CorrelationFilter) registration.getFilter();
+              assertThat(filter.trustInboundHeaders()).isFalse();
+            });
+  }
+
+  @Test
+  void trustsInboundHeadersWhenExplicitlyEnabled() {
+    new WebApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(HubCommonAutoConfiguration.class))
+        .withPropertyValues("hub.correlation.trust-inbound-headers=true")
+        .run(
+            context -> {
+              FilterRegistrationBean<?> registration =
+                  context.getBean(FilterRegistrationBean.class);
+              CorrelationFilter filter = (CorrelationFilter) registration.getFilter();
+              assertThat(filter.trustInboundHeaders()).isTrue();
+            });
+  }
+
+  @Test
   void doesNotRegisterInANonWebContext() {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(HubCommonAutoConfiguration.class))
