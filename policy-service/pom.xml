@@ -55,6 +55,13 @@
       <scope>runtime</scope>
     </dependency>
     <dependency>
+      <!-- Boot 4 moved FlywayAutoConfiguration out of spring-boot-autoconfigure into its own
+           artifact; without it Flyway silently never runs (no error - it's just not
+           auto-configured at all, not even a negative condition match). -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-flyway</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.springdoc</groupId>
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
     </dependency>
@@ -72,6 +79,20 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Boot 4 moved TestRestTemplate out of spring-boot-test into its own artifact
+           (org.springframework.boot.resttestclient); no longer pulled in transitively. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-resttestclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- TestRestTemplateTestAutoConfiguration needs RestTemplateBuilder, which Boot 4 also
+           moved out into its own artifact - not pulled in by spring-boot-resttestclient. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-restclient</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>

@@ -87,6 +87,30 @@
         </plugin>
 
         <plugin>
+          <!-- Unit/slice/ArchUnit tests only: *Test.java, *Tests.java (Surefire's own
+               defaults). *IT.java is explicitly excluded too - belt and suspenders, since it
+               already doesn't match Surefire's default include patterns, but relying on that
+               silently is exactly how an *IT class went unrun for a while during phase 2. -->
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <configuration>
+            <excludes>
+              <exclude>**/*IT.java</exclude>
+            </excludes>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <!-- Integration tests (Testcontainers etc.): *IT.java. Failsafe auto-binds its
+               integration-test + verify goals to those same lifecycle phases just by being
+               declared active (no explicit <executions> needed - same convention Surefire
+               already relies on for its own default `test`-phase binding), so `mvn test`
+               never runs them but `mvn verify` always does. -->
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+        </plugin>
+
+        <plugin>
           <groupId>com.diffplug.spotless</groupId>
           <artifactId>spotless-maven-plugin</artifactId>
           <version>${spotless.version}</version>
@@ -161,6 +185,14 @@
     </pluginManagement>
 
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
       <plugin>
         <groupId>com.diffplug.spotless</groupId>
         <artifactId>spotless-maven-plugin</artifactId>

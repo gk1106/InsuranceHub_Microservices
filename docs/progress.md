@@ -1,12 +1,12 @@
 # Progress
 
-Current phase: **1 — hub-common (done, awaiting review)**
+Current phase: **2 — policy-service 01 create (done, awaiting review)**
 
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Scaffold: parent POM, 4 modules, Spotless, JaCoCo, compose (MySQL/Kafka/Keycloak/LGTM), ADR-0001 | Done |
 | 1 | hub-common: HubResponse, HubErrorCode, PiiMasker, correlation filter | Done |
-| 2 | policy-service 01 create | Not started |
+| 2 | policy-service 01 create | Done |
 | 3 | policy-service 02 renew + coverage lookup | Not started |
 | 4 | claims-service 03 register + 04 status | Not started |
 | 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Not started |
@@ -124,3 +124,114 @@ Current phase: **1 — hub-common (done, awaiting review)**
 - 84 hub-common tests (was 56), all green. Full `./mvnw verify` reactor passes, including
   policy-service's and claims-service's full `@SpringBootTest` context loads against real
   Testcontainers MySQL - which is what caught the `@ConditionalOnMissingBean` bug above.
+
+## Phase 2 notes — policy-service 01 create
+
+- Flyway `V1__init.sql` (`policy`, `policy_term`, `processed_request` - no `outbox_event`,
+  that's phase 7), entities (`Policy`/`PolicyTerm`/`ProcessedRequest`, Lombok `@Builder` +
+  `@NoArgsConstructor(PROTECTED)`, no setters), `PolicyCreationService` (the 01 create use
+  case), `PolicyController` + `CreatePolicyRequest`/`Response` + `PolicyExceptionHandler`.
+  `txn_id`/`req_id` columns match ADR-0002/the plan's constraints exactly (`CHAR(26)`,
+  `VARCHAR(64)`); PII columns (`cif`, `account_num`, `mobile_num`, `address`, `loan_acct_num`,
+  `insured_name` - all six rule-4 fields, not just the four phase-8-encryption ones
+  `service-design.md` names) are `VARCHAR(512)`.
+- **Repository ports live in `application/`, not `infrastructure/`** — a deviation from the
+  original plan text (which showed `Policy.newFrom(cmd)` and referenced
+  `infrastructure.persistence.PolicyRepository` directly). Discovered while implementing:
+  `PolicyCreationService` (application) depending on a `PolicyRepository` interface *defined in*
+  `infrastructure` violates the ArchUnit rule "infrastructure may not be accessed by any layer."
+  Fixed with a proper ports-and-adapters split: `PolicyRepository`/`PolicyTermRepository`/
+  `ProcessedRequestRepository` are plain interfaces in `application/` (only the methods actually
+  called - not full CRUD); `infrastructure/persistence/PolicyJpaRepository` etc. extend both
+  `JpaRepository` and the matching port, so Spring Data implements the port at runtime with zero
+  compile-time dependency from application back to infrastructure. Also switched entity
+  construction from a `newFrom(cmd)`-style factory (which would have required domain to import
+  the application-layer command type - the same violation, one layer down) to Lombok
+  `@Builder`, called from `application/` with unpacked primitive values.
+- `CreatePolicyCommandMapper` (MapStruct, in `api/`) maps `CreatePolicyRequest` + the three
+  header strings to `CreatePolicyCommand` - lives in `api/`, not `application/`, for the same
+  layering reason (`CreatePolicyCommand` must not import `CreatePolicyRequest`).
+- Idempotency retry (`PolicyCreationService.create`) uses `TransactionTemplate` (built from an
+  injected `PlatformTransactionManager`), not `@Transactional` on a private method, since
+  self-invocation on `this` bypasses Spring's proxy.
+- **Real concurrency bug found by the required race test, not by inspection**: the first
+  implementation only recognized "lost the idempotency race" by checking that the caught
+  `DataIntegrityViolationException` wrapped a `uk_processed_request` constraint violation by
+  name. The race test failed because two threads on the *same* `(inspId, reqId)` and
+  `policyNum` can just as easily collide on `uk_policy_policy_num` first (the `policy` insert
+  happens before `processed_request` in the transaction) - depends purely on timing, not
+  something worth hardcoding a specific constraint name for. Fixed by dropping the constraint-
+  name check entirely: on *any* `DataIntegrityViolationException`, re-look-up
+  `processed_request` by `(inspId, reqId)` - if a row now exists, that's the real proof someone
+  else won this exact request, regardless of which constraint fired; if not, rethrow. Simpler
+  and more correct than the original design. Ran the race test 3 extra times standalone
+  afterward - not flaky.
+- Three more Boot 4.1.1 modularization gaps hit (same pattern as phase 0/1's testcontainers/
+  `@ConditionalOnMissingBean` findings - each is "the feature still exists, but the class moved
+  to a new artifact with zero error until you need it"):
+  - `FlywayAutoConfiguration` moved out of `spring-boot-autoconfigure` into
+    `org.springframework.boot:spring-boot-flyway`. Without it, Flyway doesn't run - no error,
+    no log line, nothing; `ddl-auto=validate` just fails with "missing table" once you actually
+    have entities. Added to **both** policy-service and claims-service now (claims-service
+    doesn't need it yet, but will the moment phase 4 adds a migration, and this exact silent
+    failure mode is worth not re-discovering twice).
+  - `TestRestTemplate` moved out of `spring-boot-test` into
+    `org.springframework.boot:spring-boot-resttestclient` (new package
+    `org.springframework.boot.resttestclient`), and needs `@AutoConfigureTestRestTemplate`
+    explicitly - `@SpringBootTest` no longer wires it automatically. (Boot's own newer
+    recommendation is `RestTestClient`; stuck with `TestRestTemplate` here since it's still
+    fully supported in 4.1.1 and the `ResponseEntity`-based test code was already written -
+    revisit if a future phase's IT would benefit from `RestTestClient`'s fluent API.)
+  - That auto-config in turn needs `RestTemplateBuilder`, which lives in yet another new
+    artifact, `org.springframework.boot:spring-boot-restclient` - also added.
+- Integration test class was temporarily named `PolicyCreationIntegrationTest` mid-phase
+  (Failsafe wasn't configured yet - see the review round below, which fixes this and renames
+  it back to `PolicyCreationIT`).
+- ArchUnit's `LayeredArchitectureTest` now uses
+  `withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)` - without it, the rule
+  scans test classes too, and an IT that autowires a JPA repository for row-count assertions
+  (legitimate - tests aren't bound by the same layering purity as production code) trips
+  "infrastructure may not be accessed by any layer." `.withOptionalLayers(true)` (the phase-0
+  placeholder for empty layers) is now removed, as planned - every layer has real code.
+
+### Phase 2 review round 2 (2026-09-23)
+
+- **Two more ArchUnit rules**: `domainAndApplicationDoNotDependOnSpringData` (no
+  `org.springframework.data..` imports in either layer - Spring Data types belong only to
+  `infrastructure` adapters) and `domainDoesNotDependOnApplication` (the original layered-
+  architecture rule only constrains who may access `domain`, not what `domain` itself depends
+  on - this closes that gap explicitly). **Verified both actually have teeth**: temporarily
+  made `PolicyRepository` extend `CrudRepository` and confirmed the first rule failed;
+  temporarily made `Policy` reference `CreatePolicyCommand` and confirmed the second rule
+  failed; reverted both immediately after confirming.
+- `docs/adr/0003-ports-and-adapters.md` records the ports-and-adapters split (repository
+  interfaces in `application/`, Spring Data adapters in `infrastructure/`) and the accepted
+  trade-off that domain entities carry JPA annotations directly - sanctioned by
+  `testing-and-deploy.md`'s own ArchUnit rule text ("no JPA-infrastructure imports **beyond
+  annotations**").
+- **The idempotency recovery lookup now explicitly runs in its own
+  `PROPAGATION_REQUIRES_NEW` transaction** (`PolicyCreationService.recoverFromRace`, via a
+  second `TransactionTemplate` field), rather than relying on Spring Data's implicit
+  per-query-method transaction. By the time `create()`'s catch block runs, the original
+  transaction has already rolled back and completed, so REQUIRES_NEW behaves identically to
+  the implicit default here - the point is making that fact unambiguous in code, not changing
+  behavior.
+- **Sixth test scenario added, at both levels**: two threads, same `policyNum`, *different*
+  `reqId`s - the loser must get `HubBusinessException(POLICY_ALREADY_EXISTS)` (409), never an
+  uncaught exception. This is exactly the scenario `recoverFromRace` exists to handle (case 2
+  of its three-way branch) - `PolicyCreationServiceTest.losingToADifferentReqIdOnTheSamePolicyNumReturnsPolicyAlreadyExists`
+  (unit, mocked) and `PolicyCreationIT.concurrentDifferentReqIdsOnTheSamePolicyNumTheLoserGetsPolicyAlreadyExists`
+  (integration, real MySQL + real concurrent threads).
+- **Failsafe now configured** (root `pom.xml`, active for every module): `*IT.java` runs under
+  `maven-failsafe-plugin`, bound to `integration-test`+`verify` by Failsafe's own default
+  convention (no explicit `<executions>` needed - matches how Surefire's `test`-phase binding
+  already worked without one). Surefire now explicitly excludes `**/*IT.java` too (belt and
+  suspenders - already true by Surefire's own default include patterns, but relying on that
+  silently is exactly how an `*IT` class went unrun earlier this phase). `PolicyCreationIT`
+  renamed back from `PolicyCreationIntegrationTest` now that it actually runs. **Verified**:
+  `mvn test` (full reactor) mentions `PolicyCreationIT` zero times in its output; `mvn verify`
+  runs and passes all 6 of its scenarios. Removed `hub-common/pom.xml`'s now-redundant explicit
+  `maven-surefire-plugin` declaration (phase 0 leftover) since Surefire/Failsafe are active for
+  every module via the root pom now.
+- 17 policy-service tests total (6 IT + 7 unit + 3 ArchUnit + 1 context-load smoke), all
+  green. Full `./mvnw verify` reactor passes.

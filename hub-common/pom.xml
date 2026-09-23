@@ -96,13 +96,6 @@
     </dependency>
   </dependencies>
 
-  <build>
-    <plugins>
-      <!-- Library module: no spring-boot-maven-plugin (would try to build an executable jar). -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-      </plugin>
-    </plugins>
-  </build>
+  <!-- Library module: no spring-boot-maven-plugin (would try to build an executable jar).
+       Surefire/Failsafe are already active for every module via the root pom. -->
 </project>

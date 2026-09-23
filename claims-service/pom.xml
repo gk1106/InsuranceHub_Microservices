@@ -55,6 +55,14 @@
       <scope>runtime</scope>
     </dependency>
     <dependency>
+      <!-- Boot 4 moved FlywayAutoConfiguration out of spring-boot-autoconfigure into its own
+           artifact; without it Flyway silently never runs. Added proactively alongside
+           policy-service's phase 2 fix - claims-service will need it too once phase 4 adds a
+           migration here. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-flyway</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.springdoc</groupId>
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
     </dependency>
