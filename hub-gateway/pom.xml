@@ -71,12 +71,37 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- Boot 4 moved TestRestTemplate out of spring-boot-test into its own artifact
+           (org.springframework.boot.resttestclient); needs @AutoConfigureTestRestTemplate too. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-resttestclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- TestRestTemplateTestAutoConfiguration needs RestTemplateBuilder, in its own artifact. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-restclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>com.tngtech.archunit</groupId>
       <artifactId>archunit-junit5</artifactId>
     </dependency>
     <dependency>
       <groupId>org.wiremock</groupId>
       <artifactId>wiremock-standalone</artifactId>
+    </dependency>
+    <dependency>
+      <!-- AbstractHubGatewayIT's shared singleton Keycloak container (real OAuth2 validation,
+           not mocked) - see docs/adr for the Keycloak issuer-pinning ADR. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-testcontainers</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
     </dependency>
   </dependencies>
 

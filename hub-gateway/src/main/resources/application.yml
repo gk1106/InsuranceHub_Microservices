@@ -35,3 +35,23 @@ hub:
     # input, so reqId/inspId must never come from headers here - only from the decrypted body
     # and the validated JWT, set into MDC by gateway-specific code later in the pipeline.
     trust-inbound-headers: false
+  security:
+    # cross-cutting.md §4: only trust X-Forwarded-For behind the real ALB. Off here; prod's own
+    # config turns it on alongside server.forward-headers-strategy=native.
+    trust-forwarded-for: false
+  # api-contract.md §1. allowed-cidrs is a placeholder (0.0.0.0/0) pending real insurer IP
+  # ranges the spec never supplies (docs/open-questions.md Q13) - config.HubStartupGuard fails
+  # startup if this placeholder is still present outside the local profile.
+  insurers:
+    - insp-id: INSP001
+      insp-name: universalsompo
+      oauth-client-id: insp001-client
+      allowed-cidrs: [0.0.0.0/0]
+    - insp-id: INSP002
+      insp-name: sbigeneral
+      oauth-client-id: insp002-client
+      allowed-cidrs: [0.0.0.0/0]
+    - insp-id: INSP003
+      insp-name: nivabupa
+      oauth-client-id: insp003-client
+      allowed-cidrs: [0.0.0.0/0]

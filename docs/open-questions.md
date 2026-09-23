@@ -16,8 +16,22 @@ body always carries `respCode` too, so a client reading only the body still work
 Affects phase 5 (gateway response mapping).
 
 ## Q3 — Allowed `claimStatus` values and transitions
-Not finalized. **No assumption yet** — this blocks the claim status state machine
-(`INVALID_STATUS_TRANSITION`). Must be resolved before phase 4 implements 04 (status update).
+Not finalized by the bank. **Assumption**: use `service-design.md` §3's sample transitions map
+verbatim (terminal: `CLOSED`/`REPUDIATED`/`CANCELLED`; `REGISTERED` →
+`UNDER_PROCESS`/`CLOSED`/`REPUDIATED`/`CANCELLED`; `UNDER_PROCESS` →
+`UNDER_PROCESS`/`REQUIREMENT_PENDING`/`CLOSED`/`REPUDIATED`/`CANCELLED`;
+`REQUIREMENT_PENDING` → `UNDER_PROCESS`/`CLOSED`/`REPUDIATED`/`CANCELLED`), config-driven via
+`claims.status` (`ClaimStatusPolicy`), not hardcoded — easy to correct once the bank confirms
+its real state machine.
+
+**Sub-decision — same-status transitions** (e.g. `UNDER_PROCESS` → `UNDER_PROCESS`): not
+special-cased as a no-op or auto-rejected. Governed by the exact same config-driven check as
+every other transition. The sample config above already answers this: `UNDER_PROCESS` lists
+itself as an allowed target (re-affirming a claim still under process — e.g. while updating
+`claimCode` or settlement fields — is a legitimate, distinct event worth a history row), while
+`REGISTERED` and `REQUIREMENT_PENDING` do not list themselves, so those same-status attempts
+are rejected as `INVALID_STATUS_TRANSITION` like any other disallowed target. Affects phase 4b
+(`ClaimStatusPolicy`/`ClaimStatusUpdateService`).
 
 ## Q4 — Is `reqId` unique per insurer or globally?
 **Assumption**: per insurer. The idempotency key is `(inspId, reqId)`, not `reqId` alone
@@ -65,3 +79,25 @@ a `@Version`-tracked row concurrently. Affects phase 3 (renewal) and phase 4 (cl
 update, which has the same optimistic-locking exposure) - **any new project-defined error code
 future phases add needs the same treatment**: a numbered entry here before it ships, not just
 an enum addition.
+
+## Q11 — Is `INSUFFICIENT_SCOPE` (403) an acceptable respCode for a token missing the
+`Insurance` scope?
+**Assumption**: project-defined, same treatment as Q10's `CONCURRENT_UPDATE`. A token that's
+otherwise valid but lacks the required scope is "authenticated, not authorized" - distinct from
+`TOKEN_INVALID`/`TOKEN_EXPIRED` (401, "not authenticated at all"). Folding it into
+`TOKEN_INVALID` was considered and rejected: that would mean returning HTTP 403 (the
+conventional status for `insufficient_scope` per RFC 6750) with a body claiming respCode 401,
+which `api-contract.md` §4's "HTTP status mirrors respCode" rule explicitly forbids - body and
+status must never disagree. Affects phase 5 (gateway OAuth2 scope check).
+
+## Q12 — Is `PAYLOAD_TOO_LARGE` (413) an acceptable respCode for the 256 KB body limit?
+**Assumption**: project-defined, same treatment as Q10/Q11. `cross-cutting.md` §4 specifies the
+limit but not a wire error code for exceeding it. Affects phase 5 (`RequestBodySizeFilter`).
+
+## Q13 — Real per-insurer IP allowlists (CIDRs)
+Not supplied by the spec at all - `api-contract.md` §1 says each `hub.insurers[]` entry "holds
+the insurer's... IP allowlist" but the spec gives no actual ranges for INSP001/002/003.
+**Assumption**: `0.0.0.0/0` (allow-all) as an explicit placeholder in `local`/`test` config
+only - `HubStartupGuard` fails startup if this placeholder is still present in `dev`/`prod`, so
+it can't silently ship. Affects phase 5 (`IpAllowlistFilter`); real CIDRs must replace the
+placeholder before any non-local deployment.

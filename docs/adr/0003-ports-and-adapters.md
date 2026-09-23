@@ -80,3 +80,25 @@ internally.
   check, `domainAndApplicationDoNotDependOnSpringData`, and `domainDoesNotDependOnApplication`.
   All three were verified to actually fail (not just pass trivially) by temporarily introducing
   the violation each one targets and confirming the build breaks, then reverting.
+
+## Idempotency is duplicated across services, not promoted into `hub-common` (phase 4a)
+
+`claims-service`'s `Claim`, `ClaimStatusHistory` and `ProcessedRequest` entities, its ports/
+adapters split, and `ClaimRegistrationService`'s `TransactionTemplate` +
+`PROPAGATION_REQUIRES_NEW`-recovery pattern are near-verbatim copies of `policy-service`'s
+phase-2/3 code — not a shared type or shared base class in `hub-common`.
+
+**Why**: SKILL.md rule 2 is explicit — "`hub-common` stays tiny. No entities, no domain logic,
+no service-specific DTOs. If you're tempted to share a domain class, duplicate the DTO
+instead. Shared domain code couples deployments." A shared `ProcessedRequest`/idempotency
+module would mean a schema or behavior change to one service's idempotency handling forces a
+`hub-common` version bump and a rebuild/redeploy of every service depending on it — exactly the
+deployment coupling rule 2 exists to prevent. Each service's `processed_request` table is
+already a separate table in a separate database (rule 1: database per service); duplicating the
+~40 lines of entity/port/recovery code that reads and writes it costs far less than the coupling
+a shared abstraction would introduce.
+
+**Consequence**: a fix to the idempotency recovery pattern (like phase 2's constraint-name-
+checking bug) has to be applied — and tested — in each service independently. This is accepted,
+not overlooked: it is the direct, known cost of rule 2, paid once per service rather than paid
+once system-wide as a deployment-coupling risk.

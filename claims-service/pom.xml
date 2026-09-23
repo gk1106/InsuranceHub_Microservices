@@ -66,6 +66,20 @@
       <groupId>org.springdoc</groupId>
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
     </dependency>
+    <dependency>
+      <!-- Coverage lookup client (policy-service): circuit breaker + retry around the
+           @HttpExchange call. See docs/adr/0001-tech-stack.md for the Boot 4.1.1 spike. -->
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-spring-boot4</artifactId>
+    </dependency>
+    <dependency>
+      <!-- Boot 4 moved ClientHttpRequestFactoryBuilder/Settings (used to build the coverage
+           client's RestClient with explicit connect/read timeouts) into their own artifact,
+           separate from both spring-boot core and spring-boot-restclient. Found at compile time:
+           org.springframework.boot.http.client didn't resolve without this. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-http-client</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.projectlombok</groupId>
@@ -80,6 +94,19 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Boot 4 moved TestRestTemplate out of spring-boot-test into its own artifact
+           (org.springframework.boot.resttestclient); needs @AutoConfigureTestRestTemplate too. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-resttestclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- TestRestTemplateTestAutoConfiguration needs RestTemplateBuilder, in its own artifact. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-restclient</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>

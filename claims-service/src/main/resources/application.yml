@@ -35,6 +35,18 @@ springdoc:
 
 policy-service:
   base-url: http://policy-service:8081
+  # cross-cutting.md §6: start with connect 2s, read 5s.
+  #
+  # Worst-case latency this implies for one POST /internal/claims call, when policy-service is
+  # up but hanging (the dominant worst case - a read timeout is longer than a connect timeout,
+  # and Retry re-attempts the whole call, not just the connect): 3 attempts x 5s read-timeout +
+  # backoff between attempts (200ms, then 400ms - see resilience4j.retry below) = 15.6s. This is
+  # the accepted ceiling on how long registration can block before returning
+  # DOWNSTREAM_UNAVAILABLE - it is NOT enforced by an overall deadline here, so any caller of
+  # this endpoint (hub-gateway, from phase 5) must set its own timeout for claims-service longer
+  # than 15.6s, or this bound is moot from the caller's perspective.
+  connect-timeout: 2s
+  read-timeout: 5s
 
 hub:
   correlation:
@@ -42,3 +54,40 @@ hub:
     # X-Req-Id/X-Insp-Id/X-Txn-Id, so it's safe to trust them here. Defaults to false in
     # hub-common - this must stay explicit.
     trust-inbound-headers: true
+
+claims:
+  status:
+    # service-design.md §3's sample, used verbatim. Provisional - docs/open-questions.md Q3.
+    terminal: [CLOSED, REPUDIATED, CANCELLED]
+    transitions:
+      REGISTERED: [UNDER_PROCESS, CLOSED, REPUDIATED, CANCELLED]
+      # UNDER_PROCESS lists itself: re-affirming a claim still under process (e.g. while
+      # updating claimCode/settlement fields) is a valid, distinct event, not a no-op - see Q3.
+      UNDER_PROCESS: [UNDER_PROCESS, REQUIREMENT_PENDING, CLOSED, REPUDIATED, CANCELLED]
+      REQUIREMENT_PENDING: [UNDER_PROCESS, CLOSED, REPUDIATED, CANCELLED]
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      policyService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        # Allow-list, not the default "everything counts": a 404 (policy not found) is a
+        # legitimate business outcome, never a service-health signal, so it must not open the
+        # circuit. Only connectivity/server failures count.
+        record-exceptions:
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.ResourceAccessException
+  retry:
+    instances:
+      policyService:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        # cross-cutting.md §6: never retry on 4xx - only connect errors, timeouts and 503.
+        retry-exceptions:
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.ResourceAccessException

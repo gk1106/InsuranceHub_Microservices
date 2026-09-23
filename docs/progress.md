@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **3 — policy-service 02 renew + coverage lookup (done, awaiting review)**
+Current phase: **4 — claims-service 03 register + 04 status update (done, awaiting review)**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -8,7 +8,7 @@ Current phase: **3 — policy-service 02 renew + coverage lookup (done, awaiting
 | 1 | hub-common: HubResponse, HubErrorCode, PiiMasker, correlation filter | Done |
 | 2 | policy-service 01 create | Done |
 | 3 | policy-service 02 renew + coverage lookup | Done |
-| 4 | claims-service 03 register + 04 status | Not started |
+| 4 | claims-service 03 register + 04 status | Done |
 | 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Not started |
 | 6 | hub-gateway crypto: JWS/JWE | Not started |
 | 7 | Outbox + Kafka events | Not started |
@@ -334,3 +334,153 @@ Current phase: **3 — policy-service 02 renew + coverage lookup (done, awaiting
   smoke), all green. `hub-common`'s `HubErrorCodeTest` now covers 20 entries (was 19).
   Domain+application JaCoCo line coverage: 95.1%. Full `./mvnw verify` reactor passes across
   all 4 modules.
+
+## Phase 4a notes — claims-service 03 register (04 status update deferred to 4b)
+
+- `Claim`/`ClaimStatusHistory`/`ProcessedRequest`, the ports/adapters split, and
+  `ClaimRegistrationService`'s `TransactionTemplate`/recovery pattern are deliberate near-
+  duplicates of policy-service's phase 2/3 code, not shared via `hub-common` - recorded as a
+  new section in `docs/adr/0003-ports-and-adapters.md` (SKILL.md rule 2: shared domain code
+  couples deployments).
+- **First inter-service HTTP call in the system**: `claims-service` → `policy-service`'s
+  coverage endpoint, via an `@HttpExchange` interface (`PolicyServiceHttpApi`) built on a
+  manually-constructed `RestClient` (explicit connect/read timeouts from config, not Boot's
+  autoconfigured default) and `HttpServiceProxyFactory`. `@CircuitBreaker`/`@Retry` live
+  directly on the `@HttpExchange` interface's method - Spring AOP matches annotations declared
+  on the interfaces a bean's proxy implements, so this works without any wrapping method;
+  confirmed by `ClaimRegistrationResilienceIT`, not just asserted. A separate, plain
+  `PolicyCoverageClient` (implements the `application.PolicyCoverageGateway` port) does the
+  exception translation via a real try/catch at a real bean-to-bean call site - no
+  `fallbackMethod`, since Resilience4j's fallback-on-a-dynamic-proxy resolution is a known
+  fragility source and a plain catch is simpler to verify.
+- **Retry/circuit-breaker exception lists are allow-lists**
+  (`{HttpServerErrorException.ServiceUnavailable, ResourceAccessException}`), not the Resilience4j
+  default of "every exception counts." A 404 matches neither list, so it's retried zero times
+  and never counts toward the circuit breaker's failure rate - "never retry on 4xx"
+  (cross-cutting.md §6) and "a burst of legitimate 404s doesn't trip the breaker" both fall out
+  of the same config, not a special case in code. `ClaimRegistrationResilienceIT` proves both:
+  `a404IsNeverRetried` (WireMock sees exactly one request) and the circuit-open test (built
+  entirely on 503s, never 404s).
+- **Order of operations matches service-design.md §3 literally**: idempotency check → coverage
+  call (no transaction open) → re-check idempotency (race safety) → `claim_num` exists check →
+  insert. A request that will ultimately fail with `CLAIM_ALREADY_EXISTS` still pays for one
+  coverage call first - that's the spec's ordering, not an oversight.
+- **Two real bugs found by the resilience IT, neither from inspection**:
+  - Boot 4.1.1 renamed `ClientHttpRequestFactorySettings` to `HttpClientSettings`, and moved
+    `ClientHttpRequestFactoryBuilder` into a new dedicated artifact,
+    `spring-boot-http-client` - separate from both `spring-boot` core and
+    `spring-boot-restclient` (which pulls it in transitively, but claims-service only had that
+    at test scope). Compile failed with "package does not exist" until `spring-boot-http-client`
+    was added at compile scope.
+  - `PolicyServiceHttpApi.getCoverage`'s `onDate` parameter had no explicit date format, and
+    the default `LocalDate`-to-query-param conversion for an `@HttpExchange` client is **not**
+    ISO-8601 - it rendered as `dd/MM/yy` (URL-encoded, e.g. `01%2F06%2F26`), which WireMock's
+    exact-match stub then silently failed to match, returning its own unmatched-request 404,
+    which the client correctly-but-misleadingly translated to `POLICY_NOT_FOUND`. Every
+    registration in `ClaimRegistrationIT` failed this way until diagnosed by logging
+    `WireMockServer.getAllServeEvents()` and reading the literal request URL. Fixed with
+    `@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)` on the parameter, matching the pattern
+    `PolicyController.coverage()` already used server-side. A reminder that "no explicit
+    format" has a real, non-obvious default on the client side of Spring's declarative HTTP
+    clients, not just the server (MVC) side.
+- **Environment note, not a code issue**: hit the same stale/corrupted `target/classes` symptom
+  from phase 3 (an "Unresolved compilation problems" stub for `PolicyServiceClientConfig`,
+  after adding the new `spring-boot-http-client` dependency) - this time it persisted across
+  several `mvn verify` runs rather than clearing on retry, because Maven's incremental compiler
+  trusts the `.class` file's timestamp and had no reason to recompile a file whose source
+  hadn't changed since the bad write. Deleting just that one stale `.class` file (not `clean`,
+  which is still blocked by the file-lock issue reported after phase 3) forced a real
+  recompile and resolved it. Still an IDE/Maven `target/` contention issue, not a build
+  problem to route around.
+- Both new `LayeredArchitectureTest` rules verified to actually fail (not just pass trivially):
+  temporarily made `ClaimRepository extends CrudRepository` and confirmed
+  `domainAndApplicationDoNotDependOnSpringData` failed; temporarily added a
+  `RegisterClaimCommand`-typed field to `ProcessedRequest` and confirmed
+  `domainDoesNotDependOnApplication` failed; reverted both immediately after confirming.
+- 22 claims-service tests total (7 `ClaimRegistrationIT` + 4 `ClaimRegistrationResilienceIT` +
+  7 `ClaimRegistrationServiceTest` unit + 3 ArchUnit + 1 context-load smoke), all green.
+  Domain+application JaCoCo line coverage: 87.7%. Full `./mvnw verify` reactor passes across
+  all 4 modules.
+- Not in this phase: 04 (status update) and its `ObjectOptimisticLockingFailureException`
+  handler (unreachable until something mutates an existing `@Version`-tracked `claim` row),
+  the outbox/`ClaimRegistered` event (phase 7), and `GET /internal/claims/{claimNum}`.
+
+### Phase 4b pre-work housekeeping (2026-09-23)
+
+- **`@Retry`/`@CircuitBreaker` aspect order confirmed by decompiling resilience4j-spring6
+  2.4.0** (not assumed): default `retryAspectOrder`=2147483642, `circuitBreakerAspectOrder`=
+  2147483643. Lower runs outermost in Spring AOP, so **Retry wraps CircuitBreaker** - each of
+  Retry's up-to-3 attempts re-enters the CircuitBreaker aspect separately. Consequence: the
+  50%-over-a-20-call sliding window counts **individual HTTP attempts**, not logical
+  registration calls - one logical call that exhausts all 3 retries contributes 3 window
+  entries, not 1. Documented in `PolicyServiceHttpApi`.
+- **Worst-case latency for one `POST /internal/claims` call, computed precisely**: 3 attempts x
+  5s read-timeout (the dominant case - a hung-but-connected policy-service, worse than a
+  connect-timeout-only failure) + backoff between attempts (200ms, then 400ms) = **15.6s**. Not
+  enforced by an overall deadline (no `TimeLimiter` added - that would be a bigger decision than
+  this housekeeping pass warrants, and cross-cutting.md's connect/read/retry numbers were
+  already explicitly settled in the phase-4a prompt, not being revisited here). Recorded as a
+  comment in `application.yml` next to the timeout config, including the note that a caller
+  (hub-gateway, phase 5) must set its own timeout to claims-service longer than 15.6s or this
+  bound is moot from its perspective.
+
+## Phase 4b notes — claims-service 04 status update (claims-service now fully done)
+
+- No schema change - phase 4a's `V1__init.sql` already had every column 04 needs.
+- **`ClaimStatusPolicy`** (`domain/`) is a plain, Spring-free POJO taking `terminal`/
+  `transitions` via its constructor - SKILL.md's package layout explicitly lists "domain rules"
+  under `domain/`. The `@ConfigurationProperties` binding lives separately in
+  `config/ClaimStatusProperties`, wired to a `ClaimStatusPolicy` bean by `config/
+  ClaimStatusConfig`. One check (`!terminal.contains(from) && transitions.getOrDefault(from,
+  List.of()).contains(to)`) covers both conditions service-design.md §3 describes ("an unknown
+  status, or a transition out of a terminal state") - an unrecognized target is never in any
+  source's allowed list either, so no separate code path is needed.
+- **`docs/open-questions.md` Q3 resolved** (was "no assumption yet"): the transitions map is
+  `service-design.md` §3's sample verbatim, config-driven not hardcoded. Same-status
+  transitions (e.g. `UNDER_PROCESS`→`UNDER_PROCESS`) are not special-cased anywhere in code -
+  they're allowed exactly when the config lists them, which the sample already does for
+  `UNDER_PROCESS` only (re-affirming a claim still under process is a legitimate, distinct
+  event) and not for `REGISTERED`/`REQUIREMENT_PENDING`. Proven by
+  `ClaimStatusUpdateIT.sameStatusTransitionIsAllowedWhenConfigPermitsItAndWritesAHistoryRow`,
+  not just asserted.
+- **`CLAIM_NOT_FOUND` covers "doesn't exist" and "exists under a different policy" identically**:
+  `claims.findByClaimNum(claimNum).filter(c -> c.getPolicyNum().equals(cmd.policyNum()))`,
+  same `safeDetail` (just the `claimNum` the caller already sent) either way.
+  `ClaimRepository.findByClaimNum` promoted from JPA-adapter/test-only to a real port method,
+  same pattern as `PolicyRepository.findByPolicyNum` in phase 3.
+- **`Claim.applyStatusUpdate(...)` is a partial update**: `claimStatus` always changes, but
+  every settlement field (`settledAmt`, `claimCode`, `finalizationDate`, `osAgeing`,
+  `requireDetails`, `repuCancelDate`, `reasonOfClosure`) only overwrites when the command's
+  value is non-null - `PATCH` semantics, so a caller sending only `claimStatus` can't
+  accidentally erase settlement data a prior call already set.
+- **Real bug found by the concurrent-update IT, not by inspection**: two different `reqId`s
+  racing to update the same `claim` row doesn't always surface as a clean optimistic-lock
+  version mismatch. MySQL/InnoDB can instead detect a genuine deadlock between the two
+  transactions and roll one back with `CannotAcquireLockException`
+  (`PessimisticLockingFailureException`), not `ObjectOptimisticLockingFailureException`
+  (`OptimisticLockingFailureException`) - two different exception types under the *same*
+  `ConcurrencyFailureException` superclass, and both mean the same thing to the caller: retry.
+  `ClaimExceptionHandler`'s handler was written to catch only the narrower
+  `ObjectOptimisticLockingFailureException` first, which meant the deadlock case fell through
+  to the catch-all and returned 500 instead of 409 - exactly the "409 not 500" outcome the
+  required test asked for, caught by writing that exact test. Fixed by broadening the handler
+  to `ConcurrencyFailureException`, which covers both.
+- **Two self-inflicted test bugs, also worth recording**: a synthesized `txnId` in a test setup
+  helper (`"TXN-SETUP-" + claimNum`) overflowed the `CHAR(26)` column once claim numbers got
+  long enough - fixed with a short counter instead of concatenating unbounded test data into a
+  fixed-width column. And a "message leaks nothing" assertion (`doesNotContainIgnoringCase
+  ("policy")`) false-failed against its own test's claim number, `CLM-STATUS-CROSSPOLICY-1`,
+  because "CROSSPOLICY" contains "policy" as a substring - renamed the test data, not the
+  assertion.
+- 45 claims-service tests total: 21 IT (7 `ClaimRegistrationIT` + 4
+  `ClaimRegistrationResilienceIT` + 10 `ClaimStatusUpdateIT`) + 24 unit/ArchUnit/smoke (7
+  `ClaimRegistrationServiceTest` + 7 `ClaimStatusUpdateServiceTest` + 6 `ClaimStatusPolicyTest`
+  + 3 ArchUnit + 1 context-load smoke), all green, including three extra standalone runs of
+  `ClaimStatusUpdateIT` to confirm the concurrent-update test isn't flaky. Domain+application
+  JaCoCo line coverage: 89.0%. Full `./mvnw verify` reactor passes across all 4 modules.
+  `domainDoesNotDependOnApplication` re-verified against the new `ClaimStatusPolicy` class
+  specifically (not just the rule in general) by temporarily adding an `application`-package
+  field to it and confirming the build broke, then reverting.
+- claims-service is now feature-complete for phases 4a+4b. Not built: the outbox/
+  `ClaimStatusChanged` event (phase 7) and `GET /internal/claims/{claimNum}` (read model,
+  never explicitly requested).

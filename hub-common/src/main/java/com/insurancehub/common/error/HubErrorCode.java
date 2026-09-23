@@ -16,6 +16,12 @@ public enum HubErrorCode {
   TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "401", "Token Expired"),
   IP_NOT_ALLOWED(HttpStatus.FORBIDDEN, "403", "IP not allowed"),
   INSURER_MISMATCH(HttpStatus.FORBIDDEN, "403", "Insurer not authorised for inspId"),
+  // Not in the bank's spec. A token that's otherwise valid but lacks the Insurance scope is
+  // semantically "authenticated, not authorized" (RFC 6750's insufficient_scope, conventionally
+  // 403) - distinct from TOKEN_INVALID/TOKEN_EXPIRED (401, "not authenticated at all"). Folding
+  // it into TOKEN_INVALID would mean returning HTTP 403 with a body claiming respCode 401,
+  // which api-contract.md §4's "HTTP status mirrors respCode" rule forbids.
+  INSUFFICIENT_SCOPE(HttpStatus.FORBIDDEN, "403", "Insufficient token scope"),
   SIGNATURE_INVALID(HttpStatus.BAD_REQUEST, "400", "Signature verification failed"),
   DECRYPTION_FAILED(HttpStatus.BAD_REQUEST, "400", "Decryption failed"),
   POLICY_NOT_FOUND(HttpStatus.NOT_FOUND, "404", "Policy not found"),
@@ -36,6 +42,8 @@ public enum HubErrorCode {
   // ObjectOptimisticLockingFailureException (cross-cutting.md §1: "409 with a retryable hint")
   // for any service mutating a @Version-tracked row concurrently.
   CONCURRENT_UPDATE(HttpStatus.CONFLICT, "409", "Concurrent update, retry the request"),
+  // Not in the bank's spec. cross-cutting.md §4's 256 KB request body limit (hub-gateway only).
+  PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "413", "Request payload too large"),
   DOWNSTREAM_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "503", "Service temporarily unavailable"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "500", "Internal error");
 

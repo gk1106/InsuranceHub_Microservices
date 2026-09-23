@@ -33,6 +33,42 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "defaultClientScopes": ["Insurance"]
+    },
+    {
+      "clientId": "insp003-client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "insp003-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": ["Insurance"]
+    },
+    {
+      "clientId": "test-no-scope-client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "test-no-scope-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": []
+    },
+    {
+      "clientId": "test-shortlived-client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "test-shortlived-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": ["Insurance"],
+      "attributes": {
+        "access.token.lifespan": "2"
+      }
     }
   ]
 }
