@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    url: jdbc:mysql://mysql:3306/policy_db
+    username: ${POLICY_DB_USER:policy_app}
+    password: ${POLICY_DB_PASSWORD:policy_app}
+  kafka:
+    bootstrap-servers: kafka:9092

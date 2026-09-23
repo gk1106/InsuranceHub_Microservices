@@ -1,0 +1,11 @@
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://keycloak:8080/realms/insurancehub
+
+hub:
+  crypto:
+    # Allowed to be off only in the local profile (see hub.crypto startup guard, phase 6).
+    enabled: false

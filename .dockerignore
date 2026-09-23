@@ -1,0 +1,9 @@
+**/target/
+.git/
+.idea/
+*.iml
+.secrets/
+.env
+docs/
+infra/
+.sh

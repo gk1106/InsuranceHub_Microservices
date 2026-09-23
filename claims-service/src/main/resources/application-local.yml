@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    url: jdbc:mysql://mysql:3306/claims_db
+    username: ${CLAIMS_DB_USER:claims_app}
+    password: ${CLAIMS_DB_PASSWORD:claims_app}
+  kafka:
+    bootstrap-servers: kafka:9092

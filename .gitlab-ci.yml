@@ -1,0 +1,86 @@
+stages:
+  - build
+  - test
+  - quality
+  - package
+  - publish
+  - deploy-dev
+  - deploy-prod
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+cache:
+  key: maven-repo
+  paths:
+    - .m2/repository
+
+build:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  script:
+    - ./mvnw -B -DskipTests compile
+
+test:
+  stage: test
+  image: eclipse-temurin:21-jdk
+  # Testcontainers needs a Docker socket — configure the runner with docker-in-docker or a
+  # shared /var/run/docker.sock, per testing-and-deploy.md.
+  services:
+    - docker:dind
+  script:
+    - ./mvnw -B verify
+
+quality:
+  stage: quality
+  image: eclipse-temurin:21-jdk
+  script:
+    - ./mvnw -B spotless:check
+    - ./mvnw -B jacoco:check
+    # Trivy/OWASP dependency-check land in phase 8, with a documented HIGH/CRITICAL allowlist.
+
+package:
+  stage: package
+  image: docker:27
+  services:
+    - docker:27-dind
+  rules:
+    - changes:
+        - pom.xml
+        - hub-common/**/*
+      when: always
+    - changes:
+        - hub-gateway/**/*
+      when: always
+    - changes:
+        - policy-service/**/*
+      when: always
+    - changes:
+        - claims-service/**/*
+      when: always
+  script:
+    - docker build -f hub-gateway/Dockerfile -t hub-gateway:$CI_COMMIT_SHORT_SHA .
+    - docker build -f policy-service/Dockerfile -t policy-service:$CI_COMMIT_SHORT_SHA .
+    - docker build -f claims-service/Dockerfile -t claims-service:$CI_COMMIT_SHORT_SHA .
+
+publish:
+  stage: publish
+  image: docker:27
+  services:
+    - docker:27-dind
+  script:
+    # Push to ECR via GitLab OIDC -> AWS IAM role. No long-lived AWS keys in CI variables.
+    - echo "publish: wired up in phase 9 (Terraform + OIDC role)"
+
+deploy-dev:
+  stage: deploy-dev
+  script:
+    - echo "deploy-dev: wired up in phase 9"
+
+deploy-prod:
+  stage: deploy-prod
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - echo "deploy-prod: wired up in phase 9"
