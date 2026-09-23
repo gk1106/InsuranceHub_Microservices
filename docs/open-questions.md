@@ -38,3 +38,30 @@ a distinct HMAC step exists. Affects phase 6.
 ## Q8 — Can a renewal change `sumInsured` or the insured's details?
 **Assumption**: yes — allowed, and term history is kept (each renewal is a new term row, not
 an overwrite). Affects phase 3 (renewal schema and business rules).
+
+## Q9 — How is a lapsed policy represented?
+**Decision**: lapse is not a stored status. There's no `LAPSED` column, no scheduled job that
+flips one, and no cap on how long a gap between terms can be. The coverage endpoint already
+answers "is this policy active on date X" by checking whether any term's
+`[startDate, expiryDate]` covers that date, so a gap between two terms is simply a stretch of
+dates no term covers — `active=false` falls out of the date-range query, not a stored flag.
+`service-design.md` §2 already permits "allow a gap (lapsed then renewed)"; the spec gives no
+maximum-lapse-duration rule, so none is invented. Affects phase 3 (renewal/coverage) and any
+future phase that reports policy status — a "lapsed" read model, if ever needed, would compute
+it from term ranges at query time, not from stored state.
+
+## Q10 — Is `CONCURRENT_UPDATE` (409) an acceptable respCode for the bank, or should it fold
+into an existing code?
+**Assumption**: `CONCURRENT_UPDATE` is a code this project invented (`cross-cutting.md` §1
+specifies the *behavior* - map `ObjectOptimisticLockingFailureException` to "409 with a
+retryable hint" - but not a wire name for it), not one in `api-contract.md` §5's bank-defined
+catalogue. Every non-catalogue code is an assumption about what the bank's error handling
+expects, exactly like `RENEWAL_NOT_ALLOWED` before it: the bank may want 409s folded into a
+smaller set of generic codes, may already have their own name for this case, or may not expect
+a 409 here at all (e.g. if they'd rather the gateway retry once internally, per
+`cross-cutting.md` §6's retry-on-idempotent-writes note, and only surface a failure after that
+retry too fails). Until confirmed, `CONCURRENT_UPDATE`/409 stands for any service that mutates
+a `@Version`-tracked row concurrently. Affects phase 3 (renewal) and phase 4 (claim status
+update, which has the same optimistic-locking exposure) - **any new project-defined error code
+future phases add needs the same treatment**: a numbered entry here before it ships, not just
+an enum addition.

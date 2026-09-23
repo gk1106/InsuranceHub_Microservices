@@ -92,4 +92,41 @@ public class Policy {
   @Version
   @Column(name = "version", nullable = false)
   private Long version;
+
+  // Renewal is allowed to change insured details (docs/open-questions.md Q8) - a named
+  // mutator, not a blanket setter, so it stays clear this is a legitimate lifecycle event and
+  // not arbitrary field access. Mutating a managed entity is enough; JPA dirty-checking (plus
+  // the @Version bump) issues the UPDATE on commit.
+  public void updateInsuredDetails(
+      String applicationNum,
+      String cif,
+      String accountNum,
+      String insuredName,
+      String mobileNum,
+      String address,
+      String insuranceType,
+      String insuranceName,
+      String regionCode,
+      String regionName,
+      String branchCode,
+      String branchName,
+      String loanAcctNum,
+      String specPerNum,
+      String specPerName) {
+    this.applicationNum = applicationNum;
+    this.cif = cif;
+    this.accountNum = accountNum;
+    this.insuredName = insuredName;
+    this.mobileNum = mobileNum;
+    this.address = address;
+    this.insuranceType = insuranceType;
+    this.insuranceName = insuranceName;
+    this.regionCode = regionCode;
+    this.regionName = regionName;
+    this.branchCode = branchCode;
+    this.branchName = branchName;
+    this.loanAcctNum = loanAcctNum;
+    this.specPerNum = specPerNum;
+    this.specPerName = specPerName;
+  }
 }

@@ -1,13 +1,13 @@
 # Progress
 
-Current phase: **2 — policy-service 01 create (done, awaiting review)**
+Current phase: **3 — policy-service 02 renew + coverage lookup (done, awaiting review)**
 
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Scaffold: parent POM, 4 modules, Spotless, JaCoCo, compose (MySQL/Kafka/Keycloak/LGTM), ADR-0001 | Done |
 | 1 | hub-common: HubResponse, HubErrorCode, PiiMasker, correlation filter | Done |
 | 2 | policy-service 01 create | Done |
-| 3 | policy-service 02 renew + coverage lookup | Not started |
+| 3 | policy-service 02 renew + coverage lookup | Done |
 | 4 | claims-service 03 register + 04 status | Not started |
 | 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Not started |
 | 6 | hub-gateway crypto: JWS/JWE | Not started |
@@ -235,3 +235,102 @@ Current phase: **2 — policy-service 01 create (done, awaiting review)**
   every module via the root pom now.
 - 17 policy-service tests total (6 IT + 7 unit + 3 ArchUnit + 1 context-load smoke), all
   green. Full `./mvnw verify` reactor passes.
+
+## Phase 3 notes — policy-service 02 renew + coverage lookup
+
+- No schema change - `V1__init.sql`'s three tables already support both endpoints (a renewal
+  is just another `policy_term` row; coverage is a date-range read over those rows).
+- **Ports promoted from test-only to real production methods**: `PolicyRepository` gained
+  `findByPolicyNum` (was only on the JPA adapter, used by tests) and `PolicyTermRepository`
+  gained `findByPolicyId` (new) - both renewal (term history/overlap checks) and coverage
+  (date lookup) need them. `PolicyJpaRepository` no longer declares anything of its own; Spring
+  Data implements the whole port via query derivation.
+- **`Policy` gained one mutator**, `updateInsuredDetails(...)` - not a blanket setter, an
+  intention-revealing method for the one legitimate post-construction mutation (`docs/open-
+  questions.md` Q8: renewals may change insured details). JPA dirty-checking plus `@Version`
+  handles the `UPDATE` on commit.
+- **`PolicyRenewalService`/`PolicyRenewalCommand`/`PolicyRenewalResult` mirror
+  `PolicyCreationService`'s shape** (two `TransactionTemplate`s, same
+  `DataIntegrityViolationException` recovery pattern) rather than reusing the create-side
+  types, even though the field lists coincide today - naming the actual use case, not coupling
+  renewal's payload shape to create's. `RenewPolicyResult.termNo` is correct even on replay:
+  the renewal's `processed_request.resource_key` stores the new term number (a string) instead
+  of the policyNum, since policyNum is already known from the path for this endpoint.
+- **Renewal rules** (`service-design.md` §2): `term_no = max(existing) + 1`; new term's
+  `startDate` must be after the latest term's `startDate`; new term must not overlap *any*
+  existing term (inclusive boundaries) - both violations map to `RENEWAL_NOT_ALLOWED` (422).
+  Gaps between terms are explicitly allowed (`docs/open-questions.md` Q9 - lapse is derived
+  from the absence of a covering term at query time, not a stored status).
+- **`PolicyCoverageService`** is a plain `@Transactional(readOnly = true)` method (no
+  `TransactionTemplate` needed - it's called externally by the controller, not via internal
+  self-invocation, so the proxy applies normally). Returns `active=false` with null term fields
+  when no term covers `onDate`, but `insuranceType` always comes from the `policy` row so it's
+  populated either way.
+- **New `CONCURRENT_UPDATE` (409) `HubErrorCode`**, plus a
+  `PolicyExceptionHandler.handleConcurrentUpdate` mapping
+  `ObjectOptimisticLockingFailureException`: renewal is the first code path to mutate an
+  existing `@Version`-tracked row, so this became reachable where in phase 2 it genuinely
+  wasn't. `cross-cutting.md` §1 already specifies this mapping; closing the gap now also
+  benefits claims-service's phase-4 status updates.
+- **Real Boot 4/Spring 7 bug found by the overlap-rejection IT, not by inspection**:
+  `HttpStatus.UNPROCESSABLE_ENTITY` is deprecated in Spring 7 in favor of
+  `HttpStatus.UNPROCESSABLE_CONTENT` (RFC 9110 renamed 422's reason phrase) - and they're kept
+  as two *distinct* enum constants, both code 422. `HttpStatus.valueOf(422)` (used when a test
+  client resolves the status from a raw HTTP response) resolves to `UNPROCESSABLE_CONTENT`, so
+  a test asserting `isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)` fails even though the numeric
+  code matches. This had been latent since phase 2 (`POLICY_NOT_ACTIVE`,
+  `INVALID_STATUS_TRANSITION`, `RENEWAL_NOT_ALLOWED` all used the deprecated constant) - no IT
+  had asserted an exact 422 status object until `PolicyRenewalIT.overlappingTermIsRejected`.
+  Fixed at the source in `HubErrorCode` (all three 422 entries now use
+  `UNPROCESSABLE_CONTENT`); the numeric wire status (422) was never wrong, only the client-side
+  Java object identity.
+- **Environment note, not a code issue**: `mvn clean` intermittently fails on this machine with
+  "file being used by another process" on `policy-service/target/classes`, and one `clean` that
+  raced past that lock produced a build with corrupted (ECJ-style "Unresolved compilation
+  problems") stub `.class` files, itself a downstream symptom of the same lock contention
+  (something else - most likely an IDE's background compiler - writes into the same `target/`
+  directory). A plain `./mvnw verify` (no `clean`) was consistently green across three separate
+  runs.
+### Phase 3 review round (2026-09-23)
+
+- **`docs/open-questions.md` Q10**: `CONCURRENT_UPDATE` (409) is a code this project invented,
+  not one in the bank's `api-contract.md` §5 catalogue - flagged as an assumption exactly like
+  `RENEWAL_NOT_ALLOWED` was, with an explicit note that **any future project-defined error code
+  needs the same treatment** (a numbered open question before it ships, not just an enum entry).
+- **Coverage boundary tests, both ends inclusive**: `onDate == termStart` and
+  `onDate == termExpiry` are both active; one day either side of the term is not. Added at both
+  levels - `PolicyCoverageServiceTest.termBoundariesAreInclusiveOnBothEnds` (unit) and
+  `PolicyCoverageIT.termBoundariesAreInclusiveOnBothEndsOverTheWire` (real HTTP round trip) -
+  since a claim filed exactly on the expiry date is an ordinary date of loss phase 4 will send,
+  and an off-by-one here would silently reject it. The implementation
+  (`!onDate.isBefore(start) && !onDate.isAfter(expiry)`) was already correct; these tests just
+  make that explicit and pin it against regression.
+- **Coverage response shape is now contract-tested**: `PolicyCoverageIT.
+  coverageResponseContainsExactlyTheDocumentedFields` parses the raw JSON body and asserts its
+  key set equals exactly `{policyNum, active, termStart, termExpiry, sumInsured,
+  insuranceType}` - `service-design.md` §2's point that claims doesn't get the insured's name,
+  mobile, CIF or account number, enforced as a test rather than left as a convention someone
+  could quietly break later.
+- **Lapse behavior now named explicitly by a test**: renamed
+  `PolicyRenewalServiceTest.allowsARenewalAfterAGapAndAssignsTheNextTermNo` to
+  `allowsARenewalArrivingOverAYearAfterThePolicyLapsed`, with a comment cross-referencing both
+  Q9 and `PolicyCoverageServiceTest.returnsInactiveCoverageForADateInAGapBetweenTerms` - so the
+  "a renewal is accepted no matter how long the gap" behavior and the "the gap reads back as
+  `active=false`, never the nearest term's stale values" behavior are each pinned by name, not
+  just implied by a general "allow a gap" test.
+- **Real Boot 4/Jackson 3 finding, again surfaced by writing the contract test rather than by
+  inspection**: `@Autowired ObjectMapper` failed with "No qualifying bean" using
+  `com.fasterxml.jackson.databind.ObjectMapper` (Jackson 2). Boot 4.1.1's
+  `spring-boot-starter-jackson` defaults to **Jackson 3** (`tools.jackson.core:jackson-databind`,
+  package `tools.jackson.databind`) - `com.fasterxml.jackson-databind` 2.21.5 is still on the
+  classpath transitively (YAML config parsing, some test deps) but Spring no longer registers
+  it as the primary `ObjectMapper` bean. Fixed by importing `tools.jackson.databind.ObjectMapper`
+  instead; API shape is source-compatible so no other code change was needed. Same modularization
+  pattern as every other Boot 4 surprise this project has hit - the class still exists somewhere,
+  just not the one you'd reflexively import.
+- 40 policy-service tests total (16 IT across `PolicyCreationIT`/`PolicyRenewalIT`/
+  `PolicyCoverageIT` + 20 unit across `PolicyCreationServiceTest`/`PolicyRenewalServiceTest`/
+  `PolicyCoverageServiceTest`/`PolicyExceptionHandlerTest` + 3 ArchUnit + 1 context-load
+  smoke), all green. `hub-common`'s `HubErrorCodeTest` now covers 20 entries (was 19).
+  Domain+application JaCoCo line coverage: 95.1%. Full `./mvnw verify` reactor passes across
+  all 4 modules.

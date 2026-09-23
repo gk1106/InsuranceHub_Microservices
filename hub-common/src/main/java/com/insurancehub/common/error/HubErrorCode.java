@@ -22,11 +22,20 @@ public enum HubErrorCode {
   CLAIM_NOT_FOUND(HttpStatus.NOT_FOUND, "404", "Claim not found"),
   POLICY_ALREADY_EXISTS(HttpStatus.CONFLICT, "409", "Policy already exists"),
   CLAIM_ALREADY_EXISTS(HttpStatus.CONFLICT, "409", "Claim already exists"),
-  POLICY_NOT_ACTIVE(HttpStatus.UNPROCESSABLE_ENTITY, "422", "Policy not active on date of loss"),
+  // HttpStatus.UNPROCESSABLE_ENTITY is deprecated in Spring 7 (Boot 4) in favor of
+  // UNPROCESSABLE_CONTENT - RFC 9110 renamed 422's reason phrase, and Spring kept both as
+  // distinct enum constants for source compatibility. They're both code 422, but
+  // HttpStatus.valueOf(422) resolves to UNPROCESSABLE_CONTENT, so a client comparing by enum
+  // identity (not just .value()) against the deprecated constant would see a mismatch.
+  POLICY_NOT_ACTIVE(HttpStatus.UNPROCESSABLE_CONTENT, "422", "Policy not active on date of loss"),
   INVALID_STATUS_TRANSITION(
-      HttpStatus.UNPROCESSABLE_ENTITY, "422", "Invalid claim status transition"),
+      HttpStatus.UNPROCESSABLE_CONTENT, "422", "Invalid claim status transition"),
   RENEWAL_NOT_ALLOWED(
-      HttpStatus.UNPROCESSABLE_ENTITY, "422", "Renewal term overlaps existing term"),
+      HttpStatus.UNPROCESSABLE_CONTENT, "422", "Renewal term overlaps existing term"),
+  // Not in the bank's spec - project-defined, like RENEWAL_NOT_ALLOWED. Maps
+  // ObjectOptimisticLockingFailureException (cross-cutting.md §1: "409 with a retryable hint")
+  // for any service mutating a @Version-tracked row concurrently.
+  CONCURRENT_UPDATE(HttpStatus.CONFLICT, "409", "Concurrent update, retry the request"),
   DOWNSTREAM_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "503", "Service temporarily unavailable"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "500", "Internal error");
 

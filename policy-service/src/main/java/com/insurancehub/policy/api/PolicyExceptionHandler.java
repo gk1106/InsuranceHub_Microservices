@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ProblemDetail;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -37,6 +38,13 @@ public class PolicyExceptionHandler {
     log.warn("validation failed: {}", fields);
     String detail = HubErrorCode.VALIDATION_FAILED.errorDesc().replace("<field>", fields);
     return problemDetail(HubErrorCode.VALIDATION_FAILED, detail);
+  }
+
+  @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+  public ProblemDetail handleConcurrentUpdate(ObjectOptimisticLockingFailureException ex) {
+    log.warn("concurrent update conflict: {}", ex.getMessage());
+    return problemDetail(
+        HubErrorCode.CONCURRENT_UPDATE, HubErrorCode.CONCURRENT_UPDATE.errorDesc());
   }
 
   @ExceptionHandler(Exception.class)

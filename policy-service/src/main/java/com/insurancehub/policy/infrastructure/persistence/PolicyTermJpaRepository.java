@@ -5,6 +5,7 @@ import com.insurancehub.policy.domain.PolicyTerm;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+// findByPolicyId (port) covers production use (renewal's term history, coverage lookup).
 // findByPolicyPolicyNum is not on the port - it's only used by tests.
 public interface PolicyTermJpaRepository
     extends JpaRepository<PolicyTerm, Long>, PolicyTermRepository {
