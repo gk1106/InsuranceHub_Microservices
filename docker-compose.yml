@@ -51,6 +51,18 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_HEALTH_ENABLED: "true"
+      # Keycloak 26's hostname-v2 provider: without this, the `iss` claim is derived from
+      # whichever Host header the caller used, so a token fetched via the host-mapped
+      # localhost:8190 carries iss=http://localhost:8190/... while hub-gateway's issuer-uri is
+      # the container-network http://keycloak:8080/... - same realm, same signing key, but
+      # Spring Security's JwtIssuerValidator rejects on the exact-string mismatch regardless.
+      # Pinning this makes Keycloak issue http://keycloak:8080/... no matter which host/port a
+      # client used to reach it (send-sample.sh still fetches the token via localhost:8190 - see
+      # docs/adr). A bare hostname ("keycloak") was tried first and confirmed NOT sufficient: it
+      # pins the hostname but still reflects the caller's own port into the issuer -
+      # `curl http://localhost:8190/realms/insurancehub/.well-known/openid-configuration` showed
+      # "issuer":"http://keycloak:8190/...". A full URL pins both hostname and port.
+      KC_HOSTNAME: http://keycloak:8080
     volumes:
       - ./docker/keycloak/insurancehub-realm.json:/opt/keycloak/data/import/insurancehub-realm.json:ro
     ports:

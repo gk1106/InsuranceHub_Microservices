@@ -58,8 +58,14 @@ public class IpAllowlistFilter extends OncePerRequestFilter {
     String clientId = jwt.getClaimAsString("azp");
     Optional<InsurerConfig> insurer = resolveInsurer(clientId);
     if (insurer.isEmpty()) {
-      // The token is validly signed and scoped, but doesn't belong to any configured insurer -
-      // an identity problem, not an IP-authorization one.
+      // Deliberately TOKEN_INVALID (401), not a distinct code: the token is validly signed and
+      // scoped, but its azp isn't any configured insurer's oauth-client-id - an identity the
+      // gateway has never heard of, which is exactly what TOKEN_INVALID's "not usable" meaning
+      // already covers. Not INSURER_MISMATCH (403) either - that code is reserved for a
+      // different, phase-6 check: a decrypted body whose header.inspId disagrees with the
+      // token's already-resolved insurer (api-contract.md §4/cross-cutting.md §5), which
+      // presupposes the token DID resolve to a real insurer. Covered by
+      // HubGatewaySecurityIT.validTokenFromAnUnregisteredClientIsRejectedAsTokenInvalid.
       responseWriter.write(response, TOKEN_INVALID);
       return;
     }

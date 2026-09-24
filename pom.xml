@@ -96,6 +96,21 @@
         </plugin>
 
         <plugin>
+          <!-- -Xlint:deprecation -Werror: a deprecated API (e.g. HttpStatus.PAYLOAD_TOO_LARGE,
+               already hit once in hub-gateway's own error mapping - see docs/progress.md phase 5
+               notes) fails the build at compile time instead of surfacing later as a silently
+               wrong runtime value. -->
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+            <compilerArgs>
+              <arg>-Xlint:deprecation</arg>
+              <arg>-Werror</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+
+        <plugin>
           <!-- Unit/slice/ArchUnit tests only: *Test.java, *Tests.java (Surefire's own
                defaults). *IT.java is explicitly excluded too - belt and suspenders, since it
                already doesn't match Surefire's default include patterns, but relying on that
@@ -194,6 +209,10 @@
     </pluginManagement>
 
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>

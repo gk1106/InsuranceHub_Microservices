@@ -4,6 +4,10 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://keycloak:8080/realms/insurancehub
+  datasource:
+    url: jdbc:mysql://mysql:3306/gateway_db
+    username: ${GATEWAY_DB_USER:gateway_app}
+    password: ${GATEWAY_DB_PASSWORD:gateway_app}
 
 hub:
   crypto:

@@ -43,7 +43,9 @@ public enum HubErrorCode {
   // for any service mutating a @Version-tracked row concurrently.
   CONCURRENT_UPDATE(HttpStatus.CONFLICT, "409", "Concurrent update, retry the request"),
   // Not in the bank's spec. cross-cutting.md §4's 256 KB request body limit (hub-gateway only).
-  PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "413", "Request payload too large"),
+  // HttpStatus.PAYLOAD_TOO_LARGE is deprecated in Spring 7 (Boot 4) in favor of
+  // CONTENT_TOO_LARGE, same RFC 9110 rename as UNPROCESSABLE_CONTENT above.
+  PAYLOAD_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "413", "Request payload too large"),
   DOWNSTREAM_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "503", "Service temporarily unavailable"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "500", "Internal error");
 

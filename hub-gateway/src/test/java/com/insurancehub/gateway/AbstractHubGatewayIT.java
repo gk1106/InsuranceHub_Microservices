@@ -1,5 +1,6 @@
 package com.insurancehub.gateway;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -12,6 +13,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.MountableFile;
 
 // Singleton Testcontainers pattern: one Keycloak container, started once via a static
@@ -49,14 +51,42 @@ public abstract class AbstractHubGatewayIT {
                   .forStatusCode(200)
                   .withStartupTimeout(Duration.ofMinutes(2)));
 
+  // Same singleton pattern as Keycloak above, for the same reason. Not @ServiceConnection -
+  // that annotation only auto-wires through the @Testcontainers/@Container JUnit extension,
+  // which the singleton pattern deliberately doesn't use; the datasource is wired manually
+  // below instead, exactly like issuerUri() above.
+  private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4");
+
+  // WireMock is cheap to start/reset (unlike Keycloak/MySQL) but still shared here so every IT
+  // class gets the same base-url wiring for free - each test method resets both servers itself
+  // (WIRE_MOCK.resetAll()) rather than the container being restarted.
+  protected static final WireMockServer POLICY_SERVICE = new WireMockServer(0);
+  protected static final WireMockServer CLAIMS_SERVICE = new WireMockServer(0);
+
   static {
     KEYCLOAK.start();
+    MYSQL.start();
+    POLICY_SERVICE.start();
+    CLAIMS_SERVICE.start();
   }
 
   @DynamicPropertySource
   static void keycloakProperties(DynamicPropertyRegistry registry) {
     registry.add(
         "spring.security.oauth2.resourceserver.jwt.issuer-uri", AbstractHubGatewayIT::issuerUri);
+  }
+
+  @DynamicPropertySource
+  static void mysqlProperties(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+    registry.add("spring.datasource.username", MYSQL::getUsername);
+    registry.add("spring.datasource.password", MYSQL::getPassword);
+  }
+
+  @DynamicPropertySource
+  static void downstreamServiceProperties(DynamicPropertyRegistry registry) {
+    registry.add("policy-service.base-url", () -> "http://localhost:" + POLICY_SERVICE.port());
+    registry.add("claims-service.base-url", () -> "http://localhost:" + CLAIMS_SERVICE.port());
   }
 
   private static String issuerUri() {

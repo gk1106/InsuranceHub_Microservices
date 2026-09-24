@@ -2,6 +2,7 @@ package com.insurancehub.gateway.api;
 
 import static com.insurancehub.common.error.HubErrorCode.INTERNAL_ERROR;
 import static com.insurancehub.common.error.HubErrorCode.INVALID_JSON;
+import static com.insurancehub.common.error.HubErrorCode.VALIDATION_FAILED;
 
 import com.insurancehub.common.error.HubBusinessException;
 import com.insurancehub.common.error.HubResponse;
@@ -9,6 +10,7 @@ import com.insurancehub.common.web.HubHeaders;
 import com.insurancehub.gateway.audit.AuditContext;
 import com.insurancehub.gateway.crypto.HubCryptoService;
 import com.insurancehub.gateway.domain.HubEndpoint;
+import com.insurancehub.gateway.domain.RawHubRequestBody;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -81,7 +83,16 @@ public class HubController {
       return respond(response);
     } catch (HubBusinessException e) {
       log.warn("business rejection: {} - {}", e.code(), e.safeDetail());
-      return respond(HubResponse.failure(e.code(), txnId, reqId));
+      // VALIDATION_FAILED's catalogue errorDesc is itself a template ("Validation failed:
+      // <field>") - HubRequestValidator has already substituted the real field names into
+      // safeDetail, so that's what the insurer needs to see. Every other code's safeDetail is an
+      // internal identifier (a policyNum, an inspId), never meant to replace the catalogue's
+      // fixed external wording.
+      HubResponse response =
+          e.code() == VALIDATION_FAILED
+              ? HubResponse.failure(e.code(), e.safeDetail(), txnId, reqId)
+              : HubResponse.failure(e.code(), txnId, reqId);
+      return respond(response);
     } catch (Exception e) {
       log.error("unexpected error", e);
       return respond(HubResponse.failure(INTERNAL_ERROR, txnId, reqId));

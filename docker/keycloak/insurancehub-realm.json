@@ -69,6 +69,17 @@
       "attributes": {
         "access.token.lifespan": "2"
       }
+    },
+    {
+      "clientId": "test-unregistered-client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "test-unregistered-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": ["Insurance"]
     }
   ]
 }

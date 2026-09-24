@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **5 — hub-gateway security + dispatch skeleton (commit 1 of 2, done, awaiting review)**
+Current phase: **5 — hub-gateway, both commits done, awaiting review before phase 6**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -9,7 +9,7 @@ Current phase: **5 — hub-gateway security + dispatch skeleton (commit 1 of 2, 
 | 2 | policy-service 01 create | Done |
 | 3 | policy-service 02 renew + coverage lookup | Done |
 | 4 | claims-service 03 register + 04 status | Done |
-| 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Commit 1 (security + dispatch) done |
+| 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Done (2 commits) |
 | 6 | hub-gateway crypto: JWS/JWE | Not started |
 | 7 | Outbox + Kafka events | Not started |
 | 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Not started |
@@ -542,3 +542,116 @@ container - none of them visible from reading the code:
   (picking up the two new `HubErrorCode` entries).
 - Not built yet (commit 2): the four real `CodeHandler`s, external↔internal mapping,
   `request_audit` write, downstream client wiring, and their ITs.
+
+## Phase 5 commit-1 review round fixes
+
+Before starting commit 2, fixed everything flagged in commit-1 review:
+- **Expired-token detection now gates on `JwtValidationException`, not message-matching.**
+  Confirmed against real Keycloak (three exception-chain shapes captured for missing/malformed/
+  expired tokens) that `JwtValidationException` only ever appears in the chain *after* a token
+  has already decoded and signature-verified successfully and then failed a validator (issuer or
+  timestamp) - a bad signature or malformed token throws plain `BadJwtException` instead, never
+  reaching this class. So looking for a `JwtValidationException` at all already rules out
+  signature/decode failures by construction; only its own `getErrors()` text still needs
+  reading (`JwtTimestampValidator` uses the same `invalid_token` code for both expiry and
+  not-yet-valid, distinguished only by description).
+- **`-Xlint:deprecation -Werror`** added to the parent POM for all four modules. Found and fixed
+  three real deprecated-API usages this immediately caught: `HttpStatus.PAYLOAD_TOO_LARGE` (→
+  `CONTENT_TOO_LARGE`, same Spring 7 rename `UNPROCESSABLE_ENTITY` already hit in phase 3/4) in
+  `hub-common`'s `HubErrorCode`, and `org.testcontainers.containers.MySQLContainer` (→
+  `org.testcontainers.mysql.MySQLContainer`, a Testcontainers module split) across all 8 test
+  files in policy-service/claims-service/hub-gateway that used it - the new module's
+  `MySQLContainer` also isn't generic anymore (`MySQLContainer`, not `MySQLContainer<?>`).
+- **`LayeredArchitectureTest`'s `.withOptionalLayers(true)`** removed now that `application/`
+  and `infrastructure/` are populated (commit 2).
+- **A defined code + test for a valid token whose client id isn't in `hub.insurers`**: confirmed
+  `TOKEN_INVALID` (401) is the deliberate, documented choice (not `INSURER_MISMATCH`, which is
+  reserved for a different, phase-6 check - a decrypted body whose `header.inspId` disagrees
+  with the token's *already-resolved* insurer). Added `test-unregistered-client` to the test
+  realm and `HubGatewaySecurityIT.validTokenFromAnUnregisteredClientIsRejectedAsTokenInvalid`.
+  The other four review-round items (scope respCode consistency, the `0.0.0.0/0` startup guard,
+  the 256 KB body limit, `NoOpHubCryptoService`'s `matchIfMissing`, the singleton Keycloak
+  container) were already done in commit 1.
+- `docs/adr/0004-keycloak-hostname-pinning.md` and `docs/adr/0005-audit-everything.md` added -
+  durable records for the two review-round design decisions, not just code comments.
+
+## Phase 5 commit-2 notes — mapping, dispatch, audit, error handling
+
+The four real `CodeHandler`s (`api/`), external↔internal mapping (`mapping/`), downstream client
+wiring (`infrastructure/client/`), and the `request_audit` write (`RequestAuditFilter` wrapping
+the whole pipeline, `RequestAuditService`, `RequestAuditJpaRepository`) - hub-gateway is now
+feature-complete for phase 5 (crypto still off; phase 6 swaps in the real JWS/JWE
+`HubCryptoService`).
+
+**Package-layout correction, carried over from commit 1's own ArchUnit correction**: the plan
+originally had the mapper layer converting raw validated strings directly into wire DTOs. That
+would put an `application/`-layer port (`PolicyServiceGateway`, `ClaimsServiceGateway`)
+depending on `infrastructure/client/`-owned wire DTOs, which the same ArchUnit rule that moved
+`CodeHandler`/`HubDispatcher` into `api/` in commit 1 also forbids (`Infrastructure
+mayNotBeAccessedByAnyLayer` - application may not depend on it either). Fixed by giving
+`application/` its own plain
+Command/Result records (`CreatePolicyCommand`, `PolicyServiceResult`, etc.) that mirror the wire
+shape field-for-field; `mapping/`'s per-code mappers (unconstrained by the layered-architecture
+rule, so free to import both `domain/`'s `RawPolicyDetails`/`RawClaimDetails` and
+`application/`'s Command types) produce the Command, and each `infrastructure/client/` adapter
+translates Command → wire request DTO → real HTTP call → wire response DTO → Result privately,
+inside itself. `RawHeader`/`RawHubRequestBody`/`RawPolicyDetails`/`RawClaimDetails` themselves
+moved from `api/` to `domain/` for the same reason - `application/`'s `HubRequestValidator`
+needs to read them directly, and `application` may not depend on `api` either.
+
+Real bugs found only once tests actually ran, not by inspection:
+- **`DateTimeFormatter`'s default SMART resolver does not reject an impossible date.**
+  `LocalDate.parse("30/02/2024", DateTimeFormatter.ofPattern("dd/MM/yyyy"))` silently **clamps**
+  day-of-month to the nearest valid value (parses as 29/02/2024) instead of throwing - found by
+  `ExternalDateConverterTest`, which was written expecting a `DateTimeParseException` and got a
+  parsed date back instead. Without `ResolverStyle.STRICT`, an insurer sending a nonsense date
+  would have had it silently corrupted rather than rejected as `VALIDATION_FAILED`. Fixing this
+  uncovered a second, compounding gotcha, also confirmed with a standalone reproduction before
+  relying on it: `ResolverStyle.STRICT` combined with the `yyyy` (year-of-era) pattern letter
+  then fails to parse even an ordinary *valid* date, since year-of-era needs an era STRICT won't
+  infer on its own - `uuuu` (proleptic year) is required instead. `ExternalDateConverter` now
+  uses `dd/MM/uuuu` + `STRICT`.
+- **`HttpServiceProxyFactory` does not treat an unannotated `@HttpExchange` parameter as the
+  request body**, unlike Spring MVC controller methods - confirmed at runtime
+  (`IllegalStateException: Could not resolve parameter... No suitable resolver`) for *every*
+  `PolicyServiceHttpApi`/`ClaimsServiceHttpApi` method, including the single-parameter ones.
+  Fixed by adding explicit `@RequestBody` to each wire-request parameter.
+- **`HubResponse.failure(code, txnId, reqId)` always used the catalogue's generic
+  `code.errorDesc()`, discarding the exception's own substituted detail** - so
+  `VALIDATION_FAILED`'s `<field>` placeholder was never actually being filled in on the wire; a
+  field-validation rejection's `errorDesc` was the literal string `"Validation failed: <field>"`.
+  Found by `HubGatewayFieldValidationIT` asserting the real field name appeared in the response.
+  Fixed with a new `HubResponse.failure(code, errorDesc, txnId, reqId)` overload (hub-common),
+  used only for `VALIDATION_FAILED` (`HubController`) - every other code's `safeDetail` is an
+  internal identifier (a policyNum, an inspId), never meant to replace the catalogue's fixed
+  external wording, and continues to use the plain three-arg overload.
+- Two WireMock test-authoring mistakes, worth recording since they'll recur: the static
+  `WireMock.findAll(...)`/`WireMock.post(...)` helpers talk to a *default* admin client
+  (`localhost:8080`) unrelated to a specific `WireMockServer` instance's actual (random) port -
+  use the instance method (`wireMockServer.findAll(...)`) instead. And a hand-crafted
+  `Map`-based JSON body for a stubbed `ProblemDetail` response doesn't reliably round-trip
+  through `getResponseBodyAs(ProblemDetail.class)`'s `detail` field - moot here once the
+  `HubResponse.failure` fix above meant hub-gateway discards the downstream `detail` for
+  non-`VALIDATION_FAILED` codes anyway, but worth remembering if a future test needs to assert
+  on a downstream `detail` value specifically.
+
+`./mvnw -pl hub-common,hub-gateway -am verify` green: full commit-1 + commit-2 suite, including
+`HubGatewayDispatchIT` (one happy path per code, WireMock-stubbed downstreams),
+`HubGatewayServiceCodeValidationIT`, `HubGatewayFieldValidationIT`, `HubGatewayErrorMappingIT`
+(each downstream `ProblemDetail` code + the replay-txnId proof), `HubGatewayResilienceIT`
+(shortened per-class timeouts, claims-service unreachable/slow → `DOWNSTREAM_UNAVAILABLE` never
+a 500), `HubGatewayAuditIT` (success/business-rejection/pre-trust-rejection/IP-rejection rows,
+plus a real-PII-values-never-in-any-column proof), `HubGatewayAuditWriteFailureIT` (a mocked
+`AuditRepository` throwing still returns the real response and increments the failure counter),
+plus unit tests for both converters, `HubRequestValidator`, `DownstreamErrorDecoder`,
+`RequestAudit`'s reflection field-list proof, all four mappers, and all four `CodeHandler`s.
+
+**Known issue, not caused by this phase's code changes**: `./mvnw clean verify` for the full
+4-module reactor (or various module subsets including policy-service or claims-service) showed
+intermittent `NoClassDefFoundError`/`NoSuchBeanDefinitionException` failures on completely
+unmodified classes (`CreatePolicyRequest`, a MapStruct-generated
+`ClaimRegistrationCommandMapperImpl`) not reproducible when the affected module builds alone.
+Ruled out disk space, stale Docker/Testcontainers state, and JaCoCo instrumentation as causes;
+not further root-caused. `hub-common`+`hub-gateway` together verify green reliably (confirmed
+repeatedly). Worth a dedicated follow-up investigation before relying on the full-reactor `mvn
+verify` command in CI.

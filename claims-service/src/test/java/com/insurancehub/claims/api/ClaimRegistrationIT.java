@@ -30,9 +30,9 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 
 // Real MySQL, not H2. policy-service is stubbed with WireMock, not the real service. Each test
 // uses its own claimNum/reqId so tests sharing the one Testcontainer/WireMock instance don't
@@ -44,7 +44,7 @@ class ClaimRegistrationIT {
 
   private static final String INSP_ID = "INSP001";
 
-  @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4");
+  @Container @ServiceConnection static MySQLContainer mysql = new MySQLContainer("mysql:8.4");
 
   private static final WireMockServer WIRE_MOCK = new WireMockServer(0);
 

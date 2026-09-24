@@ -110,6 +110,22 @@ class HubGatewaySecurityIT extends AbstractHubGatewayIT {
   }
 
   @Test
+  void validTokenFromAnUnregisteredClientIsRejectedAsTokenInvalid() {
+    // Signed, unexpired, carries the Insurance scope - passes authentication and authorization
+    // cleanly. Rejected only because its azp isn't any configured insurer's oauth-client-id.
+    String token = fetchToken("test-unregistered-client", "test-unregistered-secret");
+
+    ResponseEntity<String> response =
+        restTemplate.exchange(
+            "/v1/policydetail", HttpMethod.POST, entity(validBody(), token), String.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    var body = parsePlain(response.getBody());
+    assertThat(body.get("respCode")).isEqualTo("401");
+    assertThat(body.get("errorDesc")).isEqualTo("Invalid token");
+  }
+
+  @Test
   void validTokenReachesTheDispatcher() {
     String token = fetchToken("insp001-client", "insp001-secret");
 

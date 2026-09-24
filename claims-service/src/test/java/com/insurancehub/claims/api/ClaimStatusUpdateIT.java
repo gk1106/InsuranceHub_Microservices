@@ -35,9 +35,9 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 
 // Real MySQL, not H2. 04 never calls policy-service itself, but each test registers its claim
 // via the real 03 endpoint first (rather than inserting rows directly), which does need
@@ -51,7 +51,7 @@ class ClaimStatusUpdateIT {
   private static final LocalDate DATE_OF_LOSS = LocalDate.of(2026, 6, 1);
   private static final AtomicInteger SETUP_TXN_COUNTER = new AtomicInteger();
 
-  @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4");
+  @Container @ServiceConnection static MySQLContainer mysql = new MySQLContainer("mysql:8.4");
 
   private static final WireMockServer WIRE_MOCK = new WireMockServer(0);
 

@@ -27,9 +27,9 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 
 // Shortened connect/read timeouts (vs. the 2s/5s production defaults in application.yml) so the
 // timeout and circuit-open scenarios run in seconds, not tens of seconds. Retry backoff (200ms
@@ -45,7 +45,7 @@ class ClaimRegistrationResilienceIT {
   private static final String POLICY_NUM = "POL-RESILIENCE-1";
   private static final LocalDate DATE_OF_LOSS = LocalDate.of(2026, 6, 1);
 
-  @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4");
+  @Container @ServiceConnection static MySQLContainer mysql = new MySQLContainer("mysql:8.4");
 
   private static final WireMockServer WIRE_MOCK = new WireMockServer(0);
 

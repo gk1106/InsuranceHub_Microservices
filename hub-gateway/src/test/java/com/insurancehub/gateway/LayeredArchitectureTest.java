@@ -9,9 +9,9 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.library.Architectures;
 import org.junit.jupiter.api.Test;
 
-// api -> application -> domain; infrastructure implements ports. config/crypto/security/audit
-// sit outside all four layers (like every other service's config/) and are unconstrained by
-// these rules. See CLAUDE.md package layout and docs/adr/0003-ports-and-adapters.md.
+// api -> application -> domain; infrastructure implements ports. config/crypto/security/audit/
+// mapping sit outside all four layers (like every other service's config/) and are unconstrained
+// by these rules. See CLAUDE.md package layout and docs/adr/0003-ports-and-adapters.md.
 class LayeredArchitectureTest {
 
   private static final String BASE_PACKAGE = "com.insurancehub.gateway";
@@ -27,10 +27,6 @@ class LayeredArchitectureTest {
     ArchRule rule =
         Architectures.layeredArchitecture()
             .consideringOnlyDependenciesInLayers()
-            // application/ and infrastructure/ are legitimately empty until commit 2 (mapping,
-            // audit, error handling) - withOptionalLayers avoids failing on that, not on a real
-            // violation. Remove once both packages have classes in them.
-            .withOptionalLayers(true)
             .layer("Api")
             .definedBy(BASE_PACKAGE + ".api..")
             .layer("Application")

@@ -3,12 +3,13 @@ package com.insurancehub.gateway.api;
 import static com.insurancehub.common.error.HubErrorCode.TOKEN_EXPIRED;
 import static com.insurancehub.common.error.HubErrorCode.TOKEN_INVALID;
 
-import com.nimbusds.jwt.JWTParser;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.time.Instant;
-import java.util.Date;
+import java.util.Locale;
+import java.util.Objects;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.jwt.JwtValidationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 
@@ -16,15 +17,22 @@ import org.springframework.stereotype.Component;
 // shape) with the plain HubResponse.preTrustFailure() shape api-contract.md §4 requires for
 // token failures.
 //
-// "Expired" vs. "otherwise invalid" is decided by re-parsing the token's own exp claim, not by
-// matching authException's message - Spring Security doesn't expose a distinct exception type
-// for this, and the message text reaching commence() isn't a reliable signal to depend on
+// "Expired" vs. "otherwise invalid" is decided from JwtValidationException.getErrors(), never
+// by matching authException's own top-level message - that message is generic and unreliable
 // (confirmed while debugging HubGatewaySecurityIT.expiredTokenIsRejectedAsTokenExpired against
-// real Keycloak: the actual bug turned out to be SecurityConfig's default 60s JWT clock-skew
-// tolerance masking real expiry entirely - see that class - but the exception's message/type
-// still isn't something worth coupling to once expiry genuinely is rejected). Re-parsing here
-// doesn't re-verify anything: the token already failed real verification by the time we get
-// here, this only picks which error message to show.
+// real Keycloak: SecurityConfig's original 60s JWT clock-skew tolerance was masking real expiry
+// entirely, and separately, the exception commence() first sees can be a wrapper with no
+// JWT-specific detail at all). JwtValidationException is the right, safe signal instead: Nimbus
+// only throws it AFTER a token has already decoded and signature-verified successfully and THEN
+// failed one of the configured OAuth2TokenValidators (issuer, timestamp) - a bad signature or
+// malformed token throws plain BadJwtException instead, never reaching here. Confirmed against
+// real Keycloak for all three cases: missing token -> generic InsufficientAuthenticationException
+// with no JWT info; malformed token -> BadJwtException/ParseException, no JwtValidationException
+// in the chain; expired token -> JwtValidationException with
+// errors=[[invalid_token] Jwt expired at ...]. So looking for a JwtValidationException at all
+// already rules out signature/decode failures; only its own errors' text still needs reading,
+// since JwtTimestampValidator uses the same "invalid_token" error code for both expiry and
+// not-yet-valid, distinguished only by description text.
 @Component
 public class HubAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
@@ -40,19 +48,27 @@ public class HubAuthenticationEntryPoint implements AuthenticationEntryPoint {
       HttpServletResponse response,
       AuthenticationException authException)
       throws java.io.IOException {
-    responseWriter.write(response, isExpired(request) ? TOKEN_EXPIRED : TOKEN_INVALID);
+    responseWriter.write(response, isExpired(authException) ? TOKEN_EXPIRED : TOKEN_INVALID);
   }
 
-  private static boolean isExpired(HttpServletRequest request) {
-    String header = request.getHeader("Authorization");
-    if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
+  private static boolean isExpired(Throwable authException) {
+    JwtValidationException validationException = findJwtValidationException(authException);
+    if (validationException == null) {
       return false;
     }
-    try {
-      Date exp = JWTParser.parse(header.substring(7)).getJWTClaimsSet().getExpirationTime();
-      return exp != null && exp.toInstant().isBefore(Instant.now());
-    } catch (Exception e) {
-      return false;
+    return validationException.getErrors().stream()
+        .map(OAuth2Error::getDescription)
+        .filter(Objects::nonNull)
+        .anyMatch(description -> description.toLowerCase(Locale.ROOT).contains("expired"));
+  }
+
+  private static JwtValidationException findJwtValidationException(Throwable t) {
+    while (t != null) {
+      if (t instanceof JwtValidationException jwtValidationException) {
+        return jwtValidationException;
+      }
+      t = t.getCause();
     }
+    return null;
   }
 }

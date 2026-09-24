@@ -1,6 +1,12 @@
 spring:
   application:
     name: hub-gateway
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
 
 server:
   port: 8080
@@ -55,3 +61,78 @@ hub:
       insp-name: nivabupa
       oauth-client-id: insp003-client
       allowed-cidrs: [0.0.0.0/0]
+
+policy-service:
+  base-url: http://policy-service:8081
+  # cross-cutting.md §6: connect 2s / read 5s - policy-service never calls anything else, so it
+  # has no chained-retry worst case of its own to accommodate.
+  connect-timeout: 2s
+  read-timeout: 5s
+
+claims-service:
+  base-url: http://claims-service:8082
+  # 20s, not the generic 5s: claims-service's own worst case for one write call (its own
+  # application.yml comment) is 3 attempts x 5s read-timeout + backoff = 15.6s. Leaving this at
+  # 5s would mean the gateway answers the insurer roughly 10s before claims-service's own retry
+  # budget could possibly finish, making that 15.6s bound moot from here - so read-timeout must
+  # stay comfortably above it.
+  connect-timeout: 2s
+  read-timeout: 20s
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      policyService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        record-exceptions:
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.ResourceAccessException
+      claimsService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        record-exceptions:
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.ResourceAccessException
+  retry:
+    instances:
+      policyService:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        # cross-cutting.md §6: never retry on 4xx - only connect errors, timeouts and 503.
+        retry-exceptions:
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.ResourceAccessException
+      claimsService:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        # Deliberately narrower than policyService's own allow-list: excludes
+        # HttpServerErrorException$ServiceUnavailable. A clean 503 DOWNSTREAM_UNAVAILABLE from
+        # claims-service means it already exhausted its own 3 retries against policy-service; an
+        # immediate gateway-level retry against the same claims-service instance is very unlikely
+        # to land in a healthier moment within milliseconds, and would just repeat a slow,
+        # already-failed 15.6s cycle on top of itself. Only "couldn't reach it at all" is worth
+        # retrying here.
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+  bulkhead:
+    # cross-cutting.md §6 calls this out specifically for the gateway's own clients (not the
+    # domain services) - bounds concurrent in-flight calls to each downstream so one slow
+    # dependency can't exhaust the gateway's own request-handling capacity. max-wait-duration: 0
+    # fails fast (sheds load) rather than queuing more latency on top of an already-slow
+    # dependency.
+    instances:
+      policyService:
+        max-concurrent-calls: 25
+        max-wait-duration: 0
+      claimsService:
+        max-concurrent-calls: 25
+        max-wait-duration: 0

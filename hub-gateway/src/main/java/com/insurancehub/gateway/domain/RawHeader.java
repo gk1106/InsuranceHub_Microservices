@@ -1,9 +1,5 @@
-package com.insurancehub.gateway.api;
+package com.insurancehub.gateway.domain;
 
-import com.insurancehub.gateway.domain.Claim;
-import com.insurancehub.gateway.domain.ClaimStatus;
-import com.insurancehub.gateway.domain.NewPolicy;
-import com.insurancehub.gateway.domain.Renewal;
 import jakarta.validation.constraints.NotBlank;
 
 // api-contract.md §3: header fields are required for every code, so each field carries all four

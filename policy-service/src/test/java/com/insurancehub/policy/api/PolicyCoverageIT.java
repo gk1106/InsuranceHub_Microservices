@@ -19,9 +19,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
-import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
 // Real MySQL, not H2. Each test uses its own policyNum so tests sharing the one Testcontainer
@@ -33,7 +33,7 @@ class PolicyCoverageIT {
 
   private static final String INSP_ID = "INSP001";
 
-  @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4");
+  @Container @ServiceConnection static MySQLContainer mysql = new MySQLContainer("mysql:8.4");
 
   @Autowired private TestRestTemplate restTemplate;
   @Autowired private ObjectMapper objectMapper;
