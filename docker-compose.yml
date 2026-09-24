@@ -120,6 +120,22 @@ services:
       dockerfile: hub-gateway/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: local
+      # A plain scalar env var override, not a hub.insurers[]-shaped one - safe (no list-binding
+      # trap). application-local.yml's own default is false; this turns real crypto on for the
+      # compose stack so scripts/send-sample.sh does a genuine end-to-end round trip. The key
+      # paths themselves (hub.crypto.bank-keys / hub.insurers[].public-key-path) already point at
+      # /secrets/... in the base application.yml - only the volume mount below is needed to make
+      # those paths real.
+      HUB_CRYPTO_ENABLED: "true"
+      # keyRegistry only exists as a health contributor when crypto is on - Boot fails startup
+      # if a health group names a contributor that doesn't exist, so this can't live in the
+      # shared application.yml (most of the phase 5 IT suite runs crypto off). Real here since
+      # crypto really is on for the compose stack.
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,keyRegistry
+    volumes:
+      # Populated by scripts/gen-dev-keys.sh (git-ignored, never committed) - read-only, the
+      # container never writes here.
+      - ./.secrets:/secrets:ro
     ports:
       # Host-side 8090 to avoid a local port clash; internal port stays 8080.
       - "8090:8080"

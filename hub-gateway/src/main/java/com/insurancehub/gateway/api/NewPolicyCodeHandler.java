@@ -25,7 +25,7 @@ public class NewPolicyCodeHandler implements CodeHandler {
   }
 
   @Override
-  public HubResponse handle(RawHubRequestBody body, String txnId) {
+  public HubResponse handle(RawHubRequestBody body) {
     var command = mapper.toCommand(body.policyDetails());
     var result = policyServiceGateway.createPolicy(command);
     // The ORIGINAL txnId on a replay, not this attempt's - api-contract.md §4.

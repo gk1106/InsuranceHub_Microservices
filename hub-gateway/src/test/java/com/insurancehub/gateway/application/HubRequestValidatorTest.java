@@ -6,11 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.insurancehub.common.error.HubBusinessException;
 import com.insurancehub.common.error.HubErrorCode;
 import com.insurancehub.gateway.domain.Claim;
+import com.insurancehub.gateway.domain.ClaimStatus;
 import com.insurancehub.gateway.domain.NewPolicy;
 import com.insurancehub.gateway.domain.RawClaimDetails;
 import com.insurancehub.gateway.domain.RawHeader;
 import com.insurancehub.gateway.domain.RawHubRequestBody;
 import com.insurancehub.gateway.domain.RawPolicyDetails;
+import com.insurancehub.gateway.domain.Renewal;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +38,17 @@ class HubRequestValidatorTest {
                   .isEqualTo(HubErrorCode.VALIDATION_FAILED);
               assertThat(((HubBusinessException) ex).safeDetail()).contains("cif");
             });
+  }
+
+  @Test
+  void rejectsAReqIdLongerThanTheAuditColumnCanHold() {
+    RawHeader oversized =
+        new RawHeader("R".repeat(65), "NewPolicyService", "01", "INSP001", "universalsompo");
+    RawHubRequestBody body = new RawHubRequestBody(oversized, validPolicyDetails(), null);
+
+    assertThatThrownBy(() -> validator.validate(body, NewPolicy.class))
+        .isInstanceOf(HubBusinessException.class)
+        .satisfies(ex -> assertThat(((HubBusinessException) ex).safeDetail()).contains("reqId"));
   }
 
   @Test
@@ -157,6 +170,56 @@ class HubRequestValidatorTest {
         new RawHubRequestBody(validHeader(), onlyPolicyNum, validClaimDetails());
 
     validator.validate(body, Claim.class);
+  }
+
+  @Test
+  void rejectsANewPolicyRequestMissingPolicyDetailsEntirely() {
+    RawHubRequestBody body = new RawHubRequestBody(validHeader(), null, null);
+
+    assertThatThrownBy(() -> validator.validate(body, NewPolicy.class))
+        .isInstanceOf(HubBusinessException.class)
+        .satisfies(
+            ex -> assertThat(((HubBusinessException) ex).safeDetail()).contains("policyDetails"));
+  }
+
+  @Test
+  void rejectsARenewalRequestMissingPolicyDetailsEntirely() {
+    RawHubRequestBody body = new RawHubRequestBody(validHeader(), null, null);
+
+    assertThatThrownBy(() -> validator.validate(body, Renewal.class))
+        .isInstanceOf(HubBusinessException.class)
+        .satisfies(
+            ex -> assertThat(((HubBusinessException) ex).safeDetail()).contains("policyDetails"));
+  }
+
+  @Test
+  void rejectsAClaimRegistrationRequestMissingEitherDetailsObjectEntirely() {
+    RawHubRequestBody missingBoth = new RawHubRequestBody(validHeader(), null, null);
+    assertThatThrownBy(() -> validator.validate(missingBoth, Claim.class))
+        .isInstanceOf(HubBusinessException.class)
+        .satisfies(
+            ex -> {
+              String detail = ((HubBusinessException) ex).safeDetail();
+              assertThat(detail).contains("policyDetails");
+              assertThat(detail).contains("claimDetails");
+            });
+
+    RawHubRequestBody missingClaimOnly =
+        new RawHubRequestBody(validHeader(), validPolicyDetails(), null);
+    assertThatThrownBy(() -> validator.validate(missingClaimOnly, Claim.class))
+        .isInstanceOf(HubBusinessException.class)
+        .satisfies(
+            ex -> assertThat(((HubBusinessException) ex).safeDetail()).contains("claimDetails"));
+  }
+
+  @Test
+  void rejectsAClaimStatusRequestMissingClaimDetailsEntirely() {
+    RawHubRequestBody body = new RawHubRequestBody(validHeader(), null, null);
+
+    assertThatThrownBy(() -> validator.validate(body, ClaimStatus.class))
+        .isInstanceOf(HubBusinessException.class)
+        .satisfies(
+            ex -> assertThat(((HubBusinessException) ex).safeDetail()).contains("claimDetails"));
   }
 
   private static RawHubRequestBody bodyWithPolicyDetails(RawPolicyDetails details) {

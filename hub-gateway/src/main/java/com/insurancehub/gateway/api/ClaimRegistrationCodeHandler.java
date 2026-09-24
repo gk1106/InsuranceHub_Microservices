@@ -25,7 +25,7 @@ public class ClaimRegistrationCodeHandler implements CodeHandler {
   }
 
   @Override
-  public HubResponse handle(RawHubRequestBody body, String txnId) {
+  public HubResponse handle(RawHubRequestBody body) {
     var command = mapper.toCommand(body.policyDetails(), body.claimDetails());
     var result = claimsServiceGateway.registerClaim(command);
     return HubResponse.success(result.txnId(), body.header().reqId());

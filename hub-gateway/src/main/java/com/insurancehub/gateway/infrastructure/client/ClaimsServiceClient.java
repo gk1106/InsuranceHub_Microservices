@@ -9,7 +9,6 @@ import com.insurancehub.gateway.application.DownstreamErrorDecoder;
 import com.insurancehub.gateway.application.RegisterClaimCommand;
 import com.insurancehub.gateway.application.UpdateClaimStatusCommand;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
-import org.springframework.http.ProblemDetail;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
@@ -35,7 +34,7 @@ public class ClaimsServiceClient implements ClaimsServiceGateway {
       RegisterClaimResponse response = claimsServiceHttpApi.registerClaim(toRequest(command));
       return new ClaimsServiceResult(response.txnId(), response.replayed(), response.claimNum());
     } catch (HttpStatusCodeException e) {
-      throw decode(e);
+      throw errorDecoder.decode(e);
     } catch (CallNotPermittedException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
@@ -48,17 +47,10 @@ public class ClaimsServiceClient implements ClaimsServiceGateway {
           claimsServiceHttpApi.updateClaimStatus(command.claimNum(), toRequest(command));
       return new ClaimsServiceResult(response.txnId(), response.replayed(), response.claimNum());
     } catch (HttpStatusCodeException e) {
-      throw decode(e);
+      throw errorDecoder.decode(e);
     } catch (CallNotPermittedException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
-  }
-
-  private HubBusinessException decode(HttpStatusCodeException e) {
-    ProblemDetail problem = e.getResponseBodyAs(ProblemDetail.class);
-    return problem != null
-        ? errorDecoder.decode(problem)
-        : new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
   }
 
   private static RegisterClaimRequest toRequest(RegisterClaimCommand c) {

@@ -25,7 +25,7 @@ public class RenewalCodeHandler implements CodeHandler {
   }
 
   @Override
-  public HubResponse handle(RawHubRequestBody body, String txnId) {
+  public HubResponse handle(RawHubRequestBody body) {
     var command = mapper.toCommand(body.policyDetails());
     var result = policyServiceGateway.renewPolicy(command);
     return HubResponse.success(result.txnId(), body.header().reqId());

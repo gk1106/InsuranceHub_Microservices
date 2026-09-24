@@ -7,9 +7,13 @@ package com.insurancehub.gateway.crypto;
 // swaps.
 public interface HubCryptoService {
 
+  // inspId is the token's already-resolved insurer (AuditContext, populated by
+  // IpAllowlistFilter before this ever runs) - the JWS itself carries no insurer identity, so
+  // the real implementation needs to be told which insurer's public key to verify against.
   // Throws HubBusinessException(SIGNATURE_INVALID/DECRYPTION_FAILED) on failure (phase 6 -
   // unreachable in phase 5, since the no-op implementation never fails to "decrypt").
-  String verifyAndDecrypt(String enc);
+  String verifyAndDecrypt(String enc, String inspId);
 
-  String encryptAndSign(String json);
+  // Same inspId - which insurer's public key to encrypt the response to.
+  String encryptAndSign(String json, String inspId);
 }

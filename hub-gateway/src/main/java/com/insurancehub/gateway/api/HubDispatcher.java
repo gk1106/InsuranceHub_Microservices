@@ -38,7 +38,7 @@ public class HubDispatcher {
   }
 
   public HubResponse dispatch(
-      RawHubRequestBody body, HubEndpoint endpoint, String txnId, AuditContext auditContext) {
+      RawHubRequestBody body, HubEndpoint endpoint, AuditContext auditContext) {
     var header = body.header();
     HubServiceCode code =
         HubServiceCode.resolve(header.serviceType(), header.appStatusCode(), endpoint)
@@ -68,6 +68,6 @@ public class HubDispatcher {
       // safety net for programming error, not a user-facing outcome to design tests around.
       throw new HubBusinessException(INTERNAL_ERROR, "no handler registered for " + code);
     }
-    return handler.handle(body, txnId);
+    return handler.handle(body);
   }
 }

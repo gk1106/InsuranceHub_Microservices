@@ -6,6 +6,7 @@ import static java.util.stream.Collectors.toCollection;
 
 import com.insurancehub.common.error.HubBusinessException;
 import com.insurancehub.gateway.domain.Claim;
+import com.insurancehub.gateway.domain.ClaimStatus;
 import com.insurancehub.gateway.domain.NewPolicy;
 import com.insurancehub.gateway.domain.RawClaimDetails;
 import com.insurancehub.gateway.domain.RawHubRequestBody;
@@ -45,10 +46,19 @@ public class HubRequestValidator {
   public void validate(RawHubRequestBody body, Class<?> group) {
     Set<String> fields = new LinkedHashSet<>();
     fields.addAll(fieldNames(validator.validate(body.header(), group)));
-    if (body.policyDetails() != null) {
+
+    // A null policyDetails/claimDetails (the whole object missing from the JSON, not just its
+    // fields blank) must be reported here - skipping it silently would let it reach the mapper
+    // layer, which dereferences it unconditionally and NPEs (mapping.NewPolicyRequestMapper etc.
+    // assume HubRequestValidator already guaranteed a non-null, well-formed object).
+    if (requiresPolicyDetails(group) && body.policyDetails() == null) {
+      fields.add("policyDetails");
+    } else if (body.policyDetails() != null) {
       fields.addAll(fieldNames(validator.validate(body.policyDetails(), group)));
     }
-    if (body.claimDetails() != null) {
+    if (requiresClaimDetails(group) && body.claimDetails() == null) {
+      fields.add("claimDetails");
+    } else if (body.claimDetails() != null) {
       fields.addAll(fieldNames(validator.validate(body.claimDetails(), group)));
     }
     fields.addAll(crossFieldViolations(body, group, fields));
@@ -58,6 +68,18 @@ public class HubRequestValidator {
       throw new HubBusinessException(
           VALIDATION_FAILED, VALIDATION_FAILED.errorDesc().replace("<field>", joined));
     }
+  }
+
+  // Mirrors each mapper's own actual field usage (mapping.NewPolicyRequestMapper/
+  // RenewalRequestMapper/ClaimRegistrationRequestMapper/ClaimStatusRequestMapper) - 03 is the one
+  // code that needs both objects (policyNum comes from policyDetails, everything else from
+  // claimDetails, per api-contract.md §3/§7).
+  private static boolean requiresPolicyDetails(Class<?> group) {
+    return group == NewPolicy.class || group == Renewal.class || group == Claim.class;
+  }
+
+  private static boolean requiresClaimDetails(Class<?> group) {
+    return group == Claim.class || group == ClaimStatus.class;
   }
 
   private static Set<String> fieldNames(Set<? extends ConstraintViolation<?>> violations) {

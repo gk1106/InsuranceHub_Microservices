@@ -11,5 +11,13 @@ spring:
 
 hub:
   crypto:
-    # Allowed to be off only in the local profile (see hub.crypto startup guard, phase 6).
+    # Allowed to be off only in the local profile (config.HubStartupGuard). Stays false as this
+    # file's own default so the existing (phase 5) crypto-off IT suite is unaffected -
+    # docker-compose.yml turns it on for the real compose stack (HUB_CRYPTO_ENABLED=true, a
+    # plain scalar env var override - safe), and crypto-specific IT classes turn it on for
+    # themselves via @DynamicPropertySource. The key paths themselves live in the base
+    # application.yml, not here - see that file's own comment for why (a partial per-profile
+    # override of one field of a hub.insurers[] list element hits the exact same "one property
+    # source wins the whole list" binder behavior that bit hub.insurers[].allowed-cidrs in
+    # phase 5; simplest to avoid it entirely by never re-declaring hub.insurers here at all).
     enabled: false

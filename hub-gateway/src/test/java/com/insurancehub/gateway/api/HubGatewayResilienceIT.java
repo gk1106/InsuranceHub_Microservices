@@ -3,6 +3,7 @@ package com.insurancehub.gateway.api;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.patch;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.tomakehurst.wiremock.http.Fault;
@@ -10,6 +11,7 @@ import com.insurancehub.gateway.AbstractHubGatewayIT;
 import com.insurancehub.gateway.domain.RawClaimDetails;
 import com.insurancehub.gateway.domain.RawHeader;
 import com.insurancehub.gateway.domain.RawHubRequestBody;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +33,14 @@ import tools.jackson.databind.ObjectMapper;
 // (phase 4b). Only claims-service's timeouts are overridden; policyService is untouched.
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"claims-service.connect-timeout=200ms", "claims-service.read-timeout=500ms"})
+    properties = {
+      "claims-service.connect-timeout=200ms",
+      "claims-service.read-timeout=500ms",
+      // Matches the 20-call sliding window (application.yml's own claimsService config) instead
+      // of resilience4j's library default of 100 - otherwise the breaker below would need 100
+      // calls before it ever evaluates a failure rate, just to prove a 20-call window trips it.
+      "resilience4j.circuitbreaker.instances.claimsService.minimum-number-of-calls=20"
+    })
 @AutoConfigureTestRestTemplate
 class HubGatewayResilienceIT extends AbstractHubGatewayIT {
 
@@ -77,6 +86,25 @@ class HubGatewayResilienceIT extends AbstractHubGatewayIT {
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
     assertThat(decrypt(response.getBody()).get("respCode")).isEqualTo("503");
+  }
+
+  @Test
+  void repeated500sFromClaimsServiceTripTheCircuitBreaker() {
+    // record-exceptions must include HttpServerErrorException$InternalServerError, not just
+    // $ServiceUnavailable - otherwise resilience4j's allow-list semantics mean a plain 500 is
+    // never recorded as a failure at all (any exception not matching the allow-list counts as a
+    // SUCCESSFUL call for the sliding window), and a genuinely broken downstream would never trip
+    // the breaker.
+    CLAIMS_SERVICE.stubFor(
+        patch(urlPathMatching("/internal/claims/.*/status"))
+            .willReturn(aResponse().withStatus(500)));
+
+    for (int i = 0; i < 20; i++) {
+      submitStatusUpdate("CLM-BROKEN-" + i, "REQ-BROKEN-" + i);
+    }
+
+    assertThat(circuitBreakerRegistry.circuitBreaker("claimsService").getState())
+        .isEqualTo(CircuitBreaker.State.OPEN);
   }
 
   private ResponseEntity<String> submitStatusUpdate(String claimNum, String reqId) {

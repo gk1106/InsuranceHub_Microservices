@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **5 — hub-gateway, both commits done, awaiting review before phase 6**
+Current phase: **6 — hub-gateway crypto done, awaiting review before phase 7**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -10,7 +10,7 @@ Current phase: **5 — hub-gateway, both commits done, awaiting review before ph
 | 3 | policy-service 02 renew + coverage lookup | Done |
 | 4 | claims-service 03 register + 04 status | Done |
 | 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Done (2 commits) |
-| 6 | hub-gateway crypto: JWS/JWE | Not started |
+| 6 | hub-gateway crypto: JWS/JWE | Done |
 | 7 | Outbox + Kafka events | Not started |
 | 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Not started |
 | 9 | AWS: Terraform + centralized logging/monitoring + GitLab CI deploy | Not started |
@@ -655,3 +655,118 @@ Ruled out disk space, stale Docker/Testcontainers state, and JaCoCo instrumentat
 not further root-caused. `hub-common`+`hub-gateway` together verify green reliably (confirmed
 repeatedly). Worth a dedicated follow-up investigation before relying on the full-reactor `mvn
 verify` command in CI.
+
+## Phase 6 notes — hub-gateway crypto (JWS/JWE)
+
+`NoOpHubCryptoService` replaced by `NimbusHubCryptoService` (Nimbus JOSE+JWT): inbound
+Base64-decode → JWS-verify (insurer's public key) → JWE-decrypt (bank's private key); outbound
+JWE-encrypt (insurer's public key) → JWS-sign (bank's private key) → Base64. Algorithm allow-list
+(RS256 / RSA-OAEP-256 / A256GCM) is checked *before* any cryptographic operation runs, so
+algorithm-confusion attempts (`none`, `HS256`, `RSA1_5`, `A128CBC-HS256`) are rejected without
+ever touching a key. `KeyRegistry` parses every PEM once at `@PostConstruct` (bank key(s) by kid,
+each insurer's public key by `inspId`) and never throws on failure - it sets an internal
+"not loaded" flag instead, which `KeyRegistryHealthIndicator` surfaces as readiness `DOWN`
+(`crypto.KeyRegistry`/`crypto.KeyRegistryHealthIndicator`, both `@ConditionalOnProperty(hub.crypto
+.enabled=true)`, complementary to `NoOpHubCryptoService`'s own condition so exactly one
+`HubCryptoService` bean always exists). `gen-dev-keys.sh` and `send-sample.sh` are now real
+(RSA-2048 PKCS#8 keypairs for `bank`/`insp001`/`insp002`/`insp003`; a small `exec-maven-plugin`-
+invoked JVM helper, `testsupport/EnvelopeCli`, does the actual JOSE work since plain `openssl`
+CLI calls can't produce a compliant JWE compact serialization).
+
+Two real bugs found only once tests/the real stack actually ran, not by inspection:
+- **Spring Boot's readiness health *group* does not automatically include a custom
+  `HealthIndicator` bean** - it only joins the top-level aggregate `/actuator/health` endpoint by
+  default; a probe needs `management.endpoint.health.group.readiness.include` naming it
+  explicitly. Worse, **Boot fails application startup outright** if that include list names a
+  contributor that doesn't exist (`HealthContributorMembershipValidator`, not a silent drop as
+  first assumed) - so this can't be a static default in the shared `application.yml`, since most
+  of the phase-5 IT suite runs with crypto off (`keyRegistry` bean absent). Fixed by setting the
+  include list only where crypto is actually on: `docker-compose.yml`'s `hub-gateway` environment
+  (`MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE`) and `AbstractHubGatewayCryptoIT`'s own
+  `@DynamicPropertySource` (plus `HubGatewayCryptoReadinessIT` directly, since it deliberately
+  doesn't extend that base class). Caught by re-running the *full* reactor after the crypto ITs
+  looked green in isolation - the crypto-off suite (`HubGatewayAuditIT`,
+  `HubGatewaySecurityIT`, etc., all using the `local` profile's crypto-off default) failed
+  entirely on context startup until this was scoped correctly.
+- **git-bash's automatic path conversion mangles an absolute POSIX path passed as a Maven
+  `-Dexec.args=...` argument to a Windows-native `java.exe`** - `/c/Users/.../.secrets/
+  bank-public.pem` arrived at `PemKeys.readPublicKey` as `\c\Users\...` (no drive-letter colon),
+  a `NoSuchFileException` `send-sample.sh` only surfaced as an empty `ENC` variable. Fixed by
+  passing paths relative to `ROOT_DIR` (the subshell already `cd`s there) instead of `$SECRETS_DIR`'s
+  absolute form - a relative path never triggers the conversion.
+
+Also confirmed empirically, not just designed for: a JWE nested as a JWS's own signed payload
+means tampering the JWE's ciphertext *after* it's wrapped breaks the JWS signature check, not the
+JWE decrypt - `NimbusHubCryptoServiceIT`'s tampered-ciphertext test builds and tampers the JWE
+*before* wrapping/signing it, to isolate `DECRYPTION_FAILED` from `SIGNATURE_INVALID` correctly.
+
+`./mvnw -pl hub-common,hub-gateway -am verify` green: full phase-5 suite unaffected (crypto off,
+`local` profile default) + the new crypto suite - `NimbusHubCryptoServiceIT` (11, round trip for
+all 4 codes, tampered ciphertext, wrong signer, all 4 disallowed algorithms, malformed
+Base64/empty `enc`, insurer mismatch enveloped not plain, unregistered-insurer-key rejection, no
+key material/`enc`/JOSE internals ever in captured logs), `KeyRegistryTest` (5, incl. bank-key
+rotation by kid), `KeyRegistryHealthIndicatorTest` (2), `CryptoBeanSelectionTest` (3, exactly one
+`HubCryptoService` bean for enabled/disabled/absent), `NimbusHubCryptoServiceTest` (1),
+`HubGatewayCryptoAuditIT` (2, crypto rejections still write one audit row per ADR-0005),
+`HubGatewayCryptoReadinessIT`/`HubGatewayCryptoReadinessUpIT` (readiness DOWN/UP matching
+`KeyRegistry`'s own loaded state).
+
+**Manually verified against the real stack**: `scripts/gen-dev-keys.sh` → `docker compose up -d
+--build` → `/actuator/health/readiness` returns `{"status":"UP"}` (real `KeyRegistry` loaded 1
+bank key, 3 insurer public keys) → `scripts/send-sample.sh 01`/`02`/`03`/`04` each round-trip a
+genuinely signed+encrypted request through the running gateway and decrypt+verify a genuinely
+signed+encrypted response back, all four returning `{"status":"S","respCode":"200",...}`.
+
+## Phase 6 review round (ultrareview)
+
+A full-repo `/code-review ultra` pass surfaced one real regression from this phase's own change
+plus three real, pre-existing gaps in already-committed (phase 5) code. Fixed all four, plus the
+three nits it flagged, before committing:
+- **`EncryptedEnvelope.enc` losing `@NotBlank` (this phase's own change) regressed the crypto-off
+  missing-`enc` case from 400 to 500.** `NoOpHubCryptoService.verifyAndDecrypt` echoes a null
+  `enc` straight through (by design - it's an identity no-op), and
+  `ObjectMapper.readValue((String) null, ...)` throws `IllegalArgumentException`, not a
+  `JacksonException` - falling through `HubController.parse`'s catch into the generic 500
+  handler. Fixed with an explicit null check in `parse()`, throwing `INVALID_JSON` (400) directly.
+  `HubGatewayDispatchIT.missingEncFieldIsRejectedAsInvalidJsonNeverA500` pins it.
+- **`HubRequestValidator` skipped validation entirely for a `policyDetails`/`claimDetails` object
+  missing from the JSON altogether** (only blank-field values were checked, not a missing object)
+  - every mapper (`NewPolicyRequestMapper` etc.) dereferences it unconditionally, so this was a
+    real NPE-to-500 path for any code whose required object was omitted. Fixed by making
+    `HubRequestValidator.validate` report a `policyDetails`/`claimDetails` violation when the
+    resolved group requires that object and it's null (the requiredness matrix mirrors each
+    mapper's own field usage exactly - 03 is the one code needing both objects).
+- **Circuit breaker `record-exceptions` for both downstreams omitted generic 5xx**
+  (`HttpServerErrorException$InternalServerError`) - resilience4j's allow-list semantics mean a
+  downstream returning a clean 500 (not 503) was recorded as a *successful* call, so a genuinely
+  broken downstream would never trip the breaker. Added `$InternalServerError` to both breakers'
+  `record-exceptions` only (deliberately NOT to `retry-exceptions` - cross-cutting.md §6 still says
+  never retry a 500, only 503/timeouts/connect-errors).
+  `HubGatewayResilienceIT.repeated500sFromClaimsServiceTripTheCircuitBreaker` proves it (with a
+  test-only `minimum-number-of-calls=20` override matching the 20-call window, since resilience4j's
+  own default is 100).
+- **`RawHeader.reqId` had no length bound against the `request_audit.req_id VARCHAR(64)` column**,
+  and `HubDispatcher` captures it into `AuditContext` *before* `HubRequestValidator` ever runs - so
+  an oversized `reqId` could make the audit INSERT itself fail under MySQL strict mode, silently
+  losing exactly the row ADR-0005 most wants recorded (adversarial/malformed input). Fixed two ways:
+  `RawHeader.reqId` gained `@Size(max = 64)` for the clean-rejection happy path, and
+  `RequestAudit.of` now truncates `reqId`/`serviceType` defensively (the two free-text fields with
+  no upstream length bound) so the row is still written even for a request that fails validation
+  for being oversized.
+- **Nits**: `CodeHandler.handle`'s `txnId` parameter was threaded through all four implementations
+  and never read (the response always reflects the downstream's own txnId - confirmed by
+  `NewPolicyCodeHandlerTest`'s own test name) - removed from the interface, `HubDispatcher`, and
+  `HubController`. `NewPolicyRequestMapper`/`RenewalRequestMapper`'s identical 25-field
+  `RawPolicyDetails` parsing is now a shared `PolicyDetailsFields.from(...)` (their target Command
+  types stay deliberately distinct per the phase 3 precedent). `PolicyServiceClient`/
+  `ClaimsServiceClient`'s identical `decode(HttpStatusCodeException)` fallback is now one method on
+  `DownstreamErrorDecoder`.
+
+Two findings from the same review turned out to be false positives, not fixed: it reported
+`NimbusHubCryptoService`/`KeyRegistry`/`EnvelopeCli` as not existing in the repo. They exist on
+disk and the full suite (including a real `docker compose` + `send-sample.sh` run) proves them
+working - the review's bundle evidently only reflected *tracked* file changes, and this entire
+phase's new classes were still untracked (never committed) at review time.
+
+`./mvnw -pl hub-common,hub-gateway -am verify` green after all of the above: full phase 5 + phase
+6 crypto suite unaffected, plus every new/updated test the fixes above added.

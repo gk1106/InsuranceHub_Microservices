@@ -146,6 +146,28 @@
   <build>
     <plugins>
       <plugin>
+        <!-- scripts/send-sample.sh's own JOSE work (a real bash script can't produce a compliant
+             JWE compact serialization - see docs/progress.md phase 6 notes) - runs
+             testsupport.EnvelopeCli, on the test classpath, via
+             `mvn exec:java@envelope-cli -Dexec.args="..."`. No <phase> - never runs as part of
+             the normal build/verify lifecycle, only when explicitly invoked. -->
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <id>envelope-cli</id>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <configuration>
+              <mainClass>com.insurancehub.gateway.testsupport.EnvelopeCli</mainClass>
+              <classpathScope>test</classpathScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
         <configuration>

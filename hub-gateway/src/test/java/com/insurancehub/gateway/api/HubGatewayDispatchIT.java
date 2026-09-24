@@ -143,6 +143,28 @@ class HubGatewayDispatchIT extends AbstractHubGatewayIT {
     assertThat(decrypted.get("txnId")).isEqualTo("TXN-C04");
   }
 
+  @Test
+  void missingEncFieldIsRejectedAsInvalidJsonNeverA500() {
+    // Crypto off here (this whole class): EncryptedEnvelope.enc has no @NotBlank any more (that
+    // check now belongs to HubCryptoService per-implementation), so a request with no `enc` field
+    // at all reaches NoOpHubCryptoService.verifyAndDecrypt(null, ...), which echoes null straight
+    // through - HubController.parse must reject that as INVALID_JSON (same as any other
+    // malformed body - enveloped via encryptAndSign like every other business rejection, identity
+    // here since crypto is off), not let ObjectMapper's IllegalArgumentException-for-null fall
+    // through to a generic 500.
+    HttpHeaders headers = new HttpHeaders();
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    headers.setBearerAuth(token());
+    ResponseEntity<String> response =
+        restTemplate.exchange(
+            "/v1/policydetail", HttpMethod.POST, new HttpEntity<>("{}", headers), String.class);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    var decrypted = decrypt(response.getBody());
+    assertThat(decrypted.get("respCode")).isEqualTo("400");
+    assertThat(decrypted.get("errorDesc")).isEqualTo("Invalid Json Format");
+  }
+
   private static RawPolicyDetails newPolicyDetails(String policyNum) {
     return new RawPolicyDetails(
         "RC01",

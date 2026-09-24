@@ -25,7 +25,7 @@ public class ClaimStatusCodeHandler implements CodeHandler {
   }
 
   @Override
-  public HubResponse handle(RawHubRequestBody body, String txnId) {
+  public HubResponse handle(RawHubRequestBody body) {
     var command = mapper.toCommand(body.claimDetails());
     var result = claimsServiceGateway.updateClaimStatus(command);
     return HubResponse.success(result.txnId(), body.header().reqId());

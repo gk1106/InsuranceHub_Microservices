@@ -13,5 +13,5 @@ public interface CodeHandler {
 
   HubServiceCode code();
 
-  HubResponse handle(RawHubRequestBody body, String txnId);
+  HubResponse handle(RawHubRequestBody body);
 }

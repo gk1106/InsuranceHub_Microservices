@@ -78,6 +78,24 @@ public class RequestAudit {
       String respCode,
       long latencyMs,
       String clientIp) {
-    return new RequestAudit(txnId, reqId, inspId, serviceType, respCode, latencyMs, clientIp);
+    // reqId/serviceType come straight from the insurer's raw JSON header with no upstream length
+    // bound (RawHeader only requires @NotBlank) - AuditContext captures them before
+    // HubRequestValidator ever runs (HubDispatcher.dispatch), so an oversized value can reach here
+    // even for a request HubRequestValidator will go on to reject. Truncating instead of letting
+    // the INSERT fail under MySQL strict mode keeps ADR-0005's guarantee (every request gets a
+    // durable row) intact for exactly the adversarial-input case it matters most for, rather than
+    // silently falling back to "log ERROR + counter, no row" for something entirely preventable.
+    return new RequestAudit(
+        txnId,
+        truncate(reqId, 64),
+        inspId,
+        truncate(serviceType, 30),
+        respCode,
+        latencyMs,
+        clientIp);
+  }
+
+  private static String truncate(String value, int maxLength) {
+    return value != null && value.length() > maxLength ? value.substring(0, maxLength) : value;
   }
 }

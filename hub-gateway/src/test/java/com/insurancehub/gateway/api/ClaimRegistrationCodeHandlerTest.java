@@ -38,7 +38,7 @@ class ClaimRegistrationCodeHandlerTest {
             minimalPolicyDetails(),
             minimalClaimDetails());
 
-    var response = handler.handle(body, "TXN-ATTEMPT");
+    var response = handler.handle(body);
 
     assertThat(response.txnId()).isEqualTo("TXN-ORIGINAL");
     assertThat(response.status()).isEqualTo("S");

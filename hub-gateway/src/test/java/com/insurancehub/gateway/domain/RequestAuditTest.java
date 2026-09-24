@@ -57,4 +57,28 @@ class RequestAuditTest {
     assertThat(audit.getInspId()).isNull();
     assertThat(audit.getServiceType()).isNull();
   }
+
+  @Test
+  void anOversizedReqIdIsTruncatedRatherThanFailingTheInsert() {
+    // reqId/serviceType come from the insurer's raw JSON header with no upstream length bound
+    // (RawHeader's own @Size is a courtesy rejection on the happy path, not a hard guarantee -
+    // AuditContext captures the header's raw value before HubRequestValidator ever runs) - the
+    // req_id column is VARCHAR(64), so of() must never hand Hibernate a longer value.
+    String oversized = "R".repeat(100);
+
+    RequestAudit audit =
+        RequestAudit.of("01TXN", oversized, "INSP001", "NewPolicyService", "422", 5L, "10.0.0.1");
+
+    assertThat(audit.getReqId()).hasSize(64).isEqualTo("R".repeat(64));
+  }
+
+  @Test
+  void anOversizedServiceTypeIsTruncatedRatherThanFailingTheInsert() {
+    String oversized = "S".repeat(50);
+
+    RequestAudit audit =
+        RequestAudit.of("01TXN", "REQ1", "INSP001", oversized, "422", 5L, "10.0.0.1");
+
+    assertThat(audit.getServiceType()).hasSize(30).isEqualTo("S".repeat(30));
+  }
 }

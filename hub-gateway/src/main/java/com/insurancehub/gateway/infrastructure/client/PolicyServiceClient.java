@@ -9,7 +9,6 @@ import com.insurancehub.gateway.application.PolicyServiceGateway;
 import com.insurancehub.gateway.application.PolicyServiceResult;
 import com.insurancehub.gateway.application.RenewPolicyCommand;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
-import org.springframework.http.ProblemDetail;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
@@ -41,7 +40,7 @@ public class PolicyServiceClient implements PolicyServiceGateway {
       return new PolicyServiceResult(
           response.txnId(), response.replayed(), response.policyNum(), null);
     } catch (HttpStatusCodeException e) {
-      throw decode(e);
+      throw errorDecoder.decode(e);
     } catch (CallNotPermittedException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
@@ -55,17 +54,10 @@ public class PolicyServiceClient implements PolicyServiceGateway {
       return new PolicyServiceResult(
           response.txnId(), response.replayed(), response.policyNum(), response.termNo());
     } catch (HttpStatusCodeException e) {
-      throw decode(e);
+      throw errorDecoder.decode(e);
     } catch (CallNotPermittedException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
-  }
-
-  private HubBusinessException decode(HttpStatusCodeException e) {
-    ProblemDetail problem = e.getResponseBodyAs(ProblemDetail.class);
-    return problem != null
-        ? errorDecoder.decode(problem)
-        : new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
   }
 
   private static CreatePolicyRequest toRequest(CreatePolicyCommand c) {

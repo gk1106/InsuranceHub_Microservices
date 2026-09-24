@@ -21,6 +21,13 @@ management:
       probes:
         enabled: true
       show-details: never
+      # readiness's own group.include (readinessState + keyRegistry) is deliberately NOT set
+      # here: Boot's HealthContributorMembershipValidator fails startup outright if a named
+      # group member doesn't exist, and keyRegistry only exists when hub.crypto.enabled=true
+      # (KeyRegistryHealthIndicator's own @ConditionalOnProperty) - this file is shared by every
+      # profile, including local's own crypto-off default used by most of the phase 5 IT suite.
+      # Set only where crypto is actually on: docker-compose.yml's hub-gateway environment, and
+      # AbstractHubGatewayCryptoIT's own @DynamicPropertySource (crypto-specific ITs).
   health:
     livenessstate:
       enabled: true
@@ -36,6 +43,15 @@ springdoc:
 hub:
   crypto:
     enabled: true
+    # Container-mount path (docker-compose.yml mounts ./.secrets:/secrets:ro into hub-gateway)
+    # - the same single source of truth for every profile that has crypto on, deliberately not
+    # overridden per-profile (see application-local.yml's own comment on why: a partial
+    # per-profile override of hub.insurers[] hits the same list-binding trap documented there).
+    # Harmless when hub.crypto.enabled is false (crypto.KeyRegistry never loads, so never reads
+    # this) - which is the case for every IT that hasn't explicitly turned crypto on itself.
+    bank-keys:
+      - kid: bank-2026
+        private-key-path: /secrets/bank-private.pem
   correlation:
     # Explicit even though it's hub-common's default: the insurer's raw request is untrusted
     # input, so reqId/inspId must never come from headers here - only from the decrypted body
@@ -53,14 +69,17 @@ hub:
       insp-name: universalsompo
       oauth-client-id: insp001-client
       allowed-cidrs: [0.0.0.0/0]
+      public-key-path: /secrets/insp001-public.pem
     - insp-id: INSP002
       insp-name: sbigeneral
       oauth-client-id: insp002-client
       allowed-cidrs: [0.0.0.0/0]
+      public-key-path: /secrets/insp002-public.pem
     - insp-id: INSP003
       insp-name: nivabupa
       oauth-client-id: insp003-client
       allowed-cidrs: [0.0.0.0/0]
+      public-key-path: /secrets/insp003-public.pem
 
 policy-service:
   base-url: http://policy-service:8081
@@ -82,6 +101,13 @@ claims-service:
 resilience4j:
   circuitbreaker:
     instances:
+      # record-exceptions is an allow-list: once non-empty, any throwable NOT matching it counts
+      # as a SUCCESSFUL call for the sliding window (resilience4j's own semantics) - so a downstream
+      # bug that returns a clean 500 (HubErrorCode.INTERNAL_ERROR, not 503) would otherwise never
+      # count toward the failure rate and the breaker would never open for it.
+      # InternalServerError is deliberately NOT added to retry-exceptions below (cross-cutting.md
+      # §6: never retry on 4xx - only connect errors, timeouts and 503; retrying a genuine
+      # application bug three times wastes 15.6s without helping) - only the breaker needs to see it.
       policyService:
         sliding-window-type: COUNT_BASED
         sliding-window-size: 20
@@ -89,6 +115,7 @@ resilience4j:
         wait-duration-in-open-state: 30s
         record-exceptions:
           - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.HttpServerErrorException$InternalServerError
           - org.springframework.web.client.ResourceAccessException
       claimsService:
         sliding-window-type: COUNT_BASED
@@ -97,6 +124,7 @@ resilience4j:
         wait-duration-in-open-state: 30s
         record-exceptions:
           - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - org.springframework.web.client.HttpServerErrorException$InternalServerError
           - org.springframework.web.client.ResourceAccessException
   retry:
     instances:

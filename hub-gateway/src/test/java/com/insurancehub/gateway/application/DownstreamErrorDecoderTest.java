@@ -50,4 +50,13 @@ class DownstreamErrorDecoderTest {
 
     assertThat(exception.code()).isEqualTo(HubErrorCode.INTERNAL_ERROR);
   }
+
+  // decode(HttpStatusCodeException) itself isn't unit-testable in isolation:
+  // getResponseBodyAs's message-converter extractor is only wired up by RestClient's own
+  // internal error handling when it builds the exception from a real HTTP response - a
+  // hand-constructed HttpServerErrorException.create(...) throws IllegalStateException("Function
+  // to convert body not set") instead of decoding anything. This was equally true of the logic
+  // this method now replaces (previously duplicated privately in PolicyServiceClient/
+  // ClaimsServiceClient) - real coverage lives in HubGatewayErrorMappingIT, which exercises this
+  // exact call path through a real WireMock-stubbed HTTP response.
 }

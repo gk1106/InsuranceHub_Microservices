@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# Generates local dev-only JWS/JWE keypairs into ./.secrets/ (git-ignored, never committed).
-# One signing (EC P-256, ES256) and one encryption (RSA-2048, RSA-OAEP-256) keypair per party:
-# the gateway itself, and one fictitious insurer (insp001) used by scripts/send-sample.sh.
+# Generates local dev-only RSA-2048 keypairs into ./.secrets/ (git-ignored, never committed):
+# one for the bank (hub-gateway itself) and one per sample insurer. api-contract.md §2 uses the
+# *same* RSA key pair for both signing (RS256) and encryption (RSA-OAEP-256) per party - the
+# bank's key signs outbound JWS and decrypts inbound JWE; each insurer's key signs its own
+# outbound JWS, and its public half is what the bank encrypts responses *to*.
+#
+# Private keys are PKCS#8 (`-----BEGIN PRIVATE KEY-----`), generated with `openssl genpkey`, not
+# `openssl genrsa` (which produces PKCS#1, a different encoding crypto.PemKeys - and plain
+# java.security.KeyFactory generally - doesn't accept directly).
 set -euo pipefail
 
 OUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.secrets"
 mkdir -p "$OUT_DIR"
 
-gen_sign_keypair() {
+gen_keypair() {
   local name="$1"
-  openssl ecparam -name prime256v1 -genkey -noout -out "$OUT_DIR/${name}-sign-private.pem"
-  openssl ec -in "$OUT_DIR/${name}-sign-private.pem" -pubout -out "$OUT_DIR/${name}-sign-public.pem" 2>/dev/null
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out "$OUT_DIR/${name}-private.pem" 2>/dev/null
+  openssl pkey -in "$OUT_DIR/${name}-private.pem" -pubout -out "$OUT_DIR/${name}-public.pem" 2>/dev/null
 }
 
-gen_enc_keypair() {
-  local name="$1"
-  openssl genrsa -out "$OUT_DIR/${name}-enc-private.pem" 2048 2>/dev/null
-  openssl rsa -in "$OUT_DIR/${name}-enc-private.pem" -pubout -out "$OUT_DIR/${name}-enc-public.pem" 2>/dev/null
-}
-
-for party in gateway insp001; do
-  gen_sign_keypair "$party"
-  gen_enc_keypair "$party"
-  echo "generated $party sign + enc keypairs"
+for party in bank insp001 insp002 insp003; do
+  gen_keypair "$party"
+  echo "generated $party RSA-2048 keypair"
 done
 
 chmod 600 "$OUT_DIR"/*-private.pem

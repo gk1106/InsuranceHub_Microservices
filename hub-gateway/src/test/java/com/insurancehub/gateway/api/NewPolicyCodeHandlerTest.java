@@ -25,9 +25,10 @@ class NewPolicyCodeHandlerTest {
   }
 
   @Test
-  void successReflectsTheDownstreamResultNotTheAttemptTxnId() {
+  void successReflectsTheDownstreamResultsTxnId() {
     PolicyServiceGateway gateway = mock(PolicyServiceGateway.class);
-    // Downstream replay returns the ORIGINAL txnId, different from this attempt's "TXN-ATTEMPT".
+    // Downstream replay returns the ORIGINAL txnId - handle() has no attempt txnId of its own to
+    // fall back to (CodeHandler carries no such parameter), so this is the only source.
     when(gateway.createPolicy(any()))
         .thenReturn(new PolicyServiceResult("TXN-ORIGINAL", true, "POL1", null));
     var handler = new NewPolicyCodeHandler(new NewPolicyRequestMapper(), gateway);
@@ -37,7 +38,7 @@ class NewPolicyCodeHandlerTest {
             minimalPolicyDetails(),
             null);
 
-    var response = handler.handle(body, "TXN-ATTEMPT");
+    var response = handler.handle(body);
 
     assertThat(response.txnId()).isEqualTo("TXN-ORIGINAL");
     assertThat(response.reqId()).isEqualTo("REQ1");

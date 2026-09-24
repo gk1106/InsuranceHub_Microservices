@@ -16,12 +16,12 @@ import org.springframework.stereotype.Component;
 public class NoOpHubCryptoService implements HubCryptoService {
 
   @Override
-  public String verifyAndDecrypt(String enc) {
+  public String verifyAndDecrypt(String enc, String inspId) {
     return enc;
   }
 
   @Override
-  public String encryptAndSign(String json) {
+  public String encryptAndSign(String json, String inspId) {
     return json;
   }
 }

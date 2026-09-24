@@ -4,6 +4,7 @@ import com.insurancehub.common.error.HubBusinessException;
 import com.insurancehub.common.error.HubErrorCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
 
 // Reads a downstream ProblemDetail's "code" property (service-design.md §1: internal error is
 // RFC 9457 ProblemDetail with an extra "code" = a HubErrorCode name) and rebuilds the matching
@@ -16,6 +17,17 @@ import org.springframework.stereotype.Component;
 // parsed ProblemDetail body.
 @Component
 public class DownstreamErrorDecoder {
+
+  // Shared by PolicyServiceClient and ClaimsServiceClient - both had this exact same "extract
+  // ProblemDetail, fall back to DOWNSTREAM_UNAVAILABLE if the body isn't one" logic duplicated
+  // privately; it belongs to this class since decode(ProblemDetail) already lives here.
+  public HubBusinessException decode(HttpStatusCodeException e) {
+    ProblemDetail problem = e.getResponseBodyAs(ProblemDetail.class);
+    return problem != null
+        ? decode(problem)
+        : new HubBusinessException(
+            HubErrorCode.DOWNSTREAM_UNAVAILABLE, HubErrorCode.DOWNSTREAM_UNAVAILABLE.errorDesc());
+  }
 
   public HubBusinessException decode(ProblemDetail problemDetail) {
     HubErrorCode code = resolveCode(problemDetail);
