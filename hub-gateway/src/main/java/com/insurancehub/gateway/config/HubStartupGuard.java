@@ -12,7 +12,11 @@ import org.springframework.core.env.Environment;
 // SpringApplication.run() with a clear, intentional message instead of a confusing downstream
 // symptom later.
 @Configuration
-@EnableConfigurationProperties({HubCryptoProperties.class, InsurerProperties.class})
+@EnableConfigurationProperties({
+  HubCryptoProperties.class,
+  InsurerProperties.class,
+  HubSecurityProperties.class
+})
 public class HubStartupGuard {
 
   private static final Set<String> NON_LOCAL_PROFILES = Set.of("dev", "prod");

@@ -101,3 +101,11 @@ the insurer's... IP allowlist" but the spec gives no actual ranges for INSP001/0
 only - `HubStartupGuard` fails startup if this placeholder is still present in `dev`/`prod`, so
 it can't silently ship. Affects phase 5 (`IpAllowlistFilter`); real CIDRs must replace the
 placeholder before any non-local deployment.
+
+## Q14 — JWT clock skew tolerance for token expiry
+Not specified anywhere in the bank's docs. **Assumption**: 5 seconds (down from Spring Security's
+own 60-second default), enough for ordinary clock drift between the gateway and Keycloak without
+meaningfully extending how long an expired token keeps working. Found via
+`HubGatewaySecurityIT.expiredTokenIsRejectedAsTokenExpired` against real Keycloak: with the
+60-second default, a token that had expired 3 seconds earlier was still authenticating
+successfully. Affects phase 5 (`SecurityConfig`'s `JwtDecoder` bean).

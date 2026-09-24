@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
@@ -27,6 +28,11 @@ import org.testcontainers.utility.MountableFile;
 // under test reach Keycloak via the exact same localhost:{mappedPort} URL (see
 // @DynamicPropertySource below), so the issuer-mismatch problem that pinning fixes in
 // docker-compose never arises in the first place. See docs/adr for the KC_HOSTNAME ADR.
+//
+// @ActiveProfiles("local") - application-local.yml is what turns hub.crypto.enabled off (the
+// base application.yml defaults it to true); without it NoOpHubCryptoService's condition never
+// matches and HubCryptoService has zero beans. Inherited by every IT subclass.
+@ActiveProfiles("local")
 public abstract class AbstractHubGatewayIT {
 
   private static final GenericContainer<?> KEYCLOAK =

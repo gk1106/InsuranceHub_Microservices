@@ -27,6 +27,10 @@ class LayeredArchitectureTest {
     ArchRule rule =
         Architectures.layeredArchitecture()
             .consideringOnlyDependenciesInLayers()
+            // application/ and infrastructure/ are legitimately empty until commit 2 (mapping,
+            // audit, error handling) - withOptionalLayers avoids failing on that, not on a real
+            // violation. Remove once both packages have classes in them.
+            .withOptionalLayers(true)
             .layer("Api")
             .definedBy(BASE_PACKAGE + ".api..")
             .layer("Application")

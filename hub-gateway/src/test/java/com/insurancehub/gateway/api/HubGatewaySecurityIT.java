@@ -27,8 +27,24 @@ class HubGatewaySecurityIT extends AbstractHubGatewayIT {
 
   // INSP003's allowlist is narrowed just for this class, so the IP-not-allowed test has an
   // insurer to use without touching INSP001/002 (which other tests here rely on staying open).
+  // Spring's relaxed binder picks ONE property source as authoritative for the whole
+  // hub.insurers list (the first, by priority, that has an index [0] entry) - it does not merge
+  // a single overridden field from a higher-priority source into the lower-priority source's
+  // array. So narrowing just INSP003's CIDR means restating all three insurers here, not adding
+  // one key.
   @DynamicPropertySource
   static void narrowInsp003Allowlist(DynamicPropertyRegistry registry) {
+    registry.add("hub.insurers[0].insp-id", () -> "INSP001");
+    registry.add("hub.insurers[0].insp-name", () -> "universalsompo");
+    registry.add("hub.insurers[0].oauth-client-id", () -> "insp001-client");
+    registry.add("hub.insurers[0].allowed-cidrs[0]", () -> "0.0.0.0/0");
+    registry.add("hub.insurers[1].insp-id", () -> "INSP002");
+    registry.add("hub.insurers[1].insp-name", () -> "sbigeneral");
+    registry.add("hub.insurers[1].oauth-client-id", () -> "insp002-client");
+    registry.add("hub.insurers[1].allowed-cidrs[0]", () -> "0.0.0.0/0");
+    registry.add("hub.insurers[2].insp-id", () -> "INSP003");
+    registry.add("hub.insurers[2].insp-name", () -> "nivabupa");
+    registry.add("hub.insurers[2].oauth-client-id", () -> "insp003-client");
     registry.add("hub.insurers[2].allowed-cidrs[0]", () -> "10.99.99.0/24");
   }
 
@@ -65,7 +81,9 @@ class HubGatewaySecurityIT extends AbstractHubGatewayIT {
   @Test
   void expiredTokenIsRejectedAsTokenExpired() throws InterruptedException {
     String token = fetchToken("test-shortlived-client", "test-shortlived-secret");
-    Thread.sleep(3000); // realm client's access.token.lifespan is 2s
+    // realm client's access.token.lifespan is 2s; SecurityConfig's JwtDecoder tolerates a 5s
+    // clock skew on top of that (docs/open-questions.md Q14) - sleep past both with margin.
+    Thread.sleep(9000);
 
     ResponseEntity<String> response =
         restTemplate.exchange(
@@ -131,7 +149,10 @@ class HubGatewaySecurityIT extends AbstractHubGatewayIT {
             entity("{\"enc\":\"" + hugeEnc + "\"}", token),
             String.class);
 
-    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+    // Compared as a raw code, not the HttpStatus enum constant: Spring Framework renamed 413's
+    // canonical entry to CONTENT_TOO_LARGE and HttpStatus.valueOf(413) now resolves to that, not
+    // the deprecated PAYLOAD_TOO_LARGE alias - respCode is what the contract actually mirrors.
+    assertThat(response.getStatusCode().value()).isEqualTo(413);
     assertThat(parsePlain(response.getBody()).get("respCode")).isEqualTo("413");
   }
 

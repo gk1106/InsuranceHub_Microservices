@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **4 — claims-service 03 register + 04 status update (done, awaiting review)**
+Current phase: **5 — hub-gateway security + dispatch skeleton (commit 1 of 2, done, awaiting review)**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -9,7 +9,7 @@ Current phase: **4 — claims-service 03 register + 04 status update (done, awai
 | 2 | policy-service 01 create | Done |
 | 3 | policy-service 02 renew + coverage lookup | Done |
 | 4 | claims-service 03 register + 04 status | Done |
-| 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Not started |
+| 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Commit 1 (security + dispatch) done |
 | 6 | hub-gateway crypto: JWS/JWE | Not started |
 | 7 | Outbox + Kafka events | Not started |
 | 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Not started |
@@ -484,3 +484,61 @@ Current phase: **4 — claims-service 03 register + 04 status update (done, awai
 - claims-service is now feature-complete for phases 4a+4b. Not built: the outbox/
   `ClaimStatusChanged` event (phase 7) and `GET /internal/claims/{claimNum}` (read model,
   never explicitly requested).
+
+## Phase 5 notes — hub-gateway commit 1 (security + dispatch skeleton)
+
+OAuth2 resource server, insurer/IP resolution, request body size limiting, `HubServiceCode`
+resolution + `HubDispatcher`, and the pre-trust JSON error shape. Crypto stays off
+(`hub.crypto.enabled=false`, `local` profile only; `HubStartupGuard` fails startup outside
+`local`/`dev`-`prod` guards). No `CodeHandler` is registered yet - dispatch is proven via a
+deliberately mismatched service code reaching a clean `INVALID_SERVICE_CODE`, not a real
+business path (commit 2).
+
+Five real bugs surfaced only once `HubGatewaySecurityIT` actually ran against a live Keycloak
+container - none of them visible from reading the code:
+- **`HubSecurityProperties` was never registered.** `@ConfigurationProperties` alone doesn't
+  create a bean; it needs `@EnableConfigurationProperties`, which every other properties record
+  had via `HubStartupGuard` except this one. Added to the same list.
+- **`LayeredArchitectureTest` failed on empty layers, not a real violation.** `application/` and
+  `infrastructure/` legitimately have zero classes until commit 2. Restored
+  `.withOptionalLayers(true)` (to be removed once commit 2 populates both packages) rather than
+  leaving the whole rule off.
+- **Missing-scope requests got 401, not 403.** `IpAllowlistFilter` ran right after the JWT
+  authentication filter, ahead of Spring Security's own scope-based authorization - so a token
+  from a client id no insurer maps to (the test-only `test-no-scope-client`) was rejected as
+  `TOKEN_INVALID` before the scope check ever ran, masking the `INSUFFICIENT_SCOPE` case the
+  test was actually checking. Moved `IpAllowlistFilter` to run after `AuthorizationFilter`
+  instead - scope is a property of the token itself and shouldn't need insurer resolution to be
+  enforced.
+- **Expired-token detection never worked, for two compounding reasons.** (1) Spring Boot's
+  autoconfigured `JwtTimestampValidator` defaults to a 60-second clock skew - a token that
+  expired 3 seconds ago was still authenticating successfully, so the "expired" branch was
+  unreachable regardless of anything else. Tightened to 5s via a custom `JwtDecoder` bean
+  (`docs/open-questions.md` Q14 - not bank-specified). (2) Even with real expiry enforced,
+  matching `authException`'s message for the word "expired" is not reliable on this Spring
+  Security version - the exception reaching `commence()` for an expired token is a generic
+  `InsufficientAuthenticationException`, indistinguishable by message from a plain missing
+  token. Replaced with re-parsing the token's own `exp` claim directly (no re-verification -
+  the token already failed real verification by the time the entry point runs; this only picks
+  which error message to show).
+- **413's `HttpStatus` enum identity changed.** Spring Framework renamed 413's canonical entry
+  from `PAYLOAD_TOO_LARGE` to `CONTENT_TOO_LARGE`; `HttpStatus.valueOf(413)` now resolves to the
+  new one, so a test comparing by the old enum constant failed even though the wire response was
+  correct. Same class of issue `UNPROCESSABLE_ENTITY`/`UNPROCESSABLE_CONTENT` already hit for
+  422 in `hub-common`'s `HubErrorCode` (phase 3/4). Fixed by comparing the raw numeric code in
+  the test, matching how `HubController` already treats `respCode` as the source of truth rather
+  than looking up an enum.
+- Also hit along the way, not a product bug: `OAuth2ResourceServerProperties` moved package in
+  Boot 4 (`org.springframework.boot.security.oauth2.server.resource.autoconfigure`, not the old
+  `org.springframework.boot.autoconfigure.security.oauth2.resource`) - same modularization
+  pattern as `TestRestTemplate` in earlier phases. The custom `JwtDecoder` bean also had to be
+  wrapped in `SupplierJwtDecoder` (the same wrapper Boot's own autoconfiguration uses) so issuer
+  metadata is fetched lazily, not at bean-creation time - otherwise a plain `@SpringBootTest`
+  with no real Keycloak reachable fails application startup outright.
+- `./mvnw -pl hub-common,hub-gateway -am verify` green: 17 hub-gateway unit/ArchUnit tests + 7
+  `HubGatewaySecurityIT` scenarios against a real, singleton-per-JVM Keycloak container
+  (missing/malformed/expired token, missing scope with status/body agreement asserted, IP not
+  allowed, oversized body, valid-token-reaches-dispatcher), plus hub-common's existing suite
+  (picking up the two new `HubErrorCode` entries).
+- Not built yet (commit 2): the four real `CodeHandler`s, external↔internal mapping,
+  `request_audit` write, downstream client wiring, and their ITs.
