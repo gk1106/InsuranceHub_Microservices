@@ -6,11 +6,13 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 // cross-cutting.md §1: internal error = RFC 9457 ProblemDetail with an extra "code" property.
 // Never a stack trace to the client.
@@ -52,6 +54,14 @@ public class ClaimExceptionHandler {
     log.warn("concurrent update conflict: {}", ex.getMessage());
     return problemDetail(
         HubErrorCode.CONCURRENT_UPDATE, HubErrorCode.CONCURRENT_UPDATE.errorDesc());
+  }
+
+  // Phase 8 finding: see policy-service's PolicyExceptionHandler's own comment - a genuinely
+  // unmapped path throws this, and without an explicit handler the broad Exception.class
+  // catch-all below turned it into a 500 INTERNAL_ERROR instead of a clean 404.
+  @ExceptionHandler(NoResourceFoundException.class)
+  public ProblemDetail handleNoResourceFound(NoResourceFoundException ex) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "No such endpoint");
   }
 
   @ExceptionHandler(Exception.class)

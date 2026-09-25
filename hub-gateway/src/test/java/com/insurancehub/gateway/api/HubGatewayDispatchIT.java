@@ -3,6 +3,7 @@ package com.insurancehub.gateway.api;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.patch;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -68,6 +69,39 @@ class HubGatewayDispatchIT extends AbstractHubGatewayIT {
     assertThat(decrypted.get("status")).isEqualTo("S");
     assertThat(decrypted.get("txnId")).isEqualTo("TXN-P01");
     assertThat(decrypted.get("reqId")).isEqualTo("REQ01");
+  }
+
+  @Test
+  void policyServiceCallCarriesAnInternalAuthHeaderAndATraceparentHeader() {
+    // Phase 8: proves two separate defense-in-depth/observability additions actually reach the
+    // wire, not just that config exists. X-Internal-Auth is unconditional
+    // (InternalAuthHeaderInterceptor);
+    // traceparent depends on Micrometer Tracing's RestClient instrumentation actually being
+    // attached to this client - the exact risk flagged and fixed in PolicyServiceClientConfig
+    // (built from the injected RestClient.Builder bean, not a bare RestClient.builder()).
+    POLICY_SERVICE.stubFor(
+        post(urlPathEqualTo("/internal/policies"))
+            .willReturn(
+                aResponse()
+                    .withStatus(201)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"txnId\":\"TXN-P01\",\"replayed\":false,\"policyNum\":\"POL001\"}")));
+
+    var body =
+        new RawHubRequestBody(
+            new RawHeader("REQ01", "NewPolicyService", "01", "INSP001", "universalsompo"),
+            newPolicyDetails("POL001"),
+            null);
+
+    ResponseEntity<String> response = submit(body, token());
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+    var served = POLICY_SERVICE.findAll(postRequestedFor(urlPathEqualTo("/internal/policies")));
+    assertThat(served).hasSize(1);
+    var request = served.get(0);
+    assertThat(request.getHeader("X-Internal-Auth")).isNotBlank();
+    assertThat(request.getHeader("traceparent")).isNotBlank();
   }
 
   @Test

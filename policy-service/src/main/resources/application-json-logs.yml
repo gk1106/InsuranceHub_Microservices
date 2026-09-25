@@ -1,0 +1,6 @@
+logging:
+  structured:
+    format:
+      console: logstash
+
+# See hub-gateway's own application-json-logs.yml for the full rationale - identical here.

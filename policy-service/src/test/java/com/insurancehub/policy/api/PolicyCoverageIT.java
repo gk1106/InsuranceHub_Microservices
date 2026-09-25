@@ -92,7 +92,7 @@ class PolicyCoverageIT {
         restTemplate.exchange(
             "/internal/policies/POL-COV-DOES-NOT-EXIST/coverage?onDate=2026-01-01",
             HttpMethod.GET,
-            null,
+            authOnly(),
             ProblemDetail.class);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
@@ -171,7 +171,7 @@ class PolicyCoverageIT {
         restTemplate.exchange(
             "/internal/policies/POL-COV-CONTRACT-1/coverage?onDate=2026-06-15",
             HttpMethod.GET,
-            null,
+            authOnly(),
             String.class);
 
     Map<String, Object> body = objectMapper.readValue(response.getBody(), Map.class);
@@ -185,7 +185,7 @@ class PolicyCoverageIT {
     return restTemplate.exchange(
         "/internal/policies/" + policyNum + "/coverage?onDate=" + onDate,
         HttpMethod.GET,
-        null,
+        authOnly(),
         CoverageResponse.class);
   }
 
@@ -271,6 +271,13 @@ class PolicyCoverageIT {
     headers.set(HubHeaders.REQ_ID, reqId);
     headers.set(HubHeaders.INSP_ID, INSP_ID);
     headers.set(HubHeaders.TXN_ID, txnId);
+    headers.set(HubHeaders.INTERNAL_AUTH, "local-dev-internal-secret-CHANGE-ME");
     return new HttpEntity<>(body, headers);
+  }
+
+  private static HttpEntity<Void> authOnly() {
+    HttpHeaders headers = new HttpHeaders();
+    headers.set(HubHeaders.INTERNAL_AUTH, "local-dev-internal-secret-CHANGE-ME");
+    return new HttpEntity<>(headers);
   }
 }

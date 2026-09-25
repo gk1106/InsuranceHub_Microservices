@@ -47,6 +47,10 @@ public enum HubErrorCode {
   // CONTENT_TOO_LARGE, same RFC 9110 rename as UNPROCESSABLE_CONTENT above.
   PAYLOAD_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "413", "Request payload too large"),
   DOWNSTREAM_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "503", "Service temporarily unavailable"),
+  // Not in the bank's spec - project-defined, like CONCURRENT_UPDATE/INSUFFICIENT_SCOPE/
+  // PAYLOAD_TOO_LARGE before it (docs/open-questions.md). Phase 8: policy-service/claims-service
+  // reject an /internal/** request whose X-Internal-Auth header is missing or wrong.
+  INTERNAL_AUTH_FAILED(HttpStatus.UNAUTHORIZED, "401", "Internal auth failed"),
   INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "500", "Internal error");
 
   private final HttpStatus httpStatus;

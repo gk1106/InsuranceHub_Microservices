@@ -8,6 +8,7 @@ import com.insurancehub.gateway.application.ClaimsServiceResult;
 import com.insurancehub.gateway.application.DownstreamErrorDecoder;
 import com.insurancehub.gateway.application.RegisterClaimCommand;
 import com.insurancehub.gateway.application.UpdateClaimStatusCommand;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
@@ -35,7 +36,7 @@ public class ClaimsServiceClient implements ClaimsServiceGateway {
       return new ClaimsServiceResult(response.txnId(), response.replayed(), response.claimNum());
     } catch (HttpStatusCodeException e) {
       throw errorDecoder.decode(e);
-    } catch (CallNotPermittedException | ResourceAccessException e) {
+    } catch (CallNotPermittedException | BulkheadFullException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
   }
@@ -48,7 +49,7 @@ public class ClaimsServiceClient implements ClaimsServiceGateway {
       return new ClaimsServiceResult(response.txnId(), response.replayed(), response.claimNum());
     } catch (HttpStatusCodeException e) {
       throw errorDecoder.decode(e);
-    } catch (CallNotPermittedException | ResourceAccessException e) {
+    } catch (CallNotPermittedException | BulkheadFullException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
   }

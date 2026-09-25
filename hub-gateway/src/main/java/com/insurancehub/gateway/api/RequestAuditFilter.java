@@ -29,6 +29,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class RequestAuditFilter extends OncePerRequestFilter {
 
   private static final Logger log = LoggerFactory.getLogger(RequestAuditFilter.class);
+  // logging-and-monitoring.md §4: a dedicated logger, routed independently from ordinary
+  // application logs by a CloudWatch subscription filter on logger_name (phase 9). One INFO
+  // line per request, alongside (not instead of) the request_audit DB row below.
+  private static final Logger auditLog = LoggerFactory.getLogger("insurancehub.audit");
 
   private final RequestAuditService auditService;
   private final ClientIpResolver clientIpResolver;
@@ -59,6 +63,16 @@ public class RequestAuditFilter extends OncePerRequestFilter {
       String txnId = MDC.get(HubHeaders.MDC_TXN_ID);
       String clientIp = clientIpResolver.resolve(request);
       int respCode = response.getStatus();
+      // cross-cutting.md §2: "one INFO line per request at the gateway (code, respCode,
+      // latency)". Structured key-values, not string concatenation, so respCode/latencyMs
+      // become queryable JSON fields once logging.structured.format.console=logstash is on
+      // (phase 8's json-logs profile); txnId/reqId/inspId/serviceType/traceId/spanId come from
+      // MDC automatically as top-level fields.
+      auditLog
+          .atInfo()
+          .addKeyValue("respCode", respCode)
+          .addKeyValue("latencyMs", latencyMs)
+          .log("request completed");
       try {
         auditService.record(
             txnId,
@@ -81,6 +95,11 @@ public class RequestAuditFilter extends OncePerRequestFilter {
             clientIp,
             e);
         auditWriteFailureCounter.increment();
+      } finally {
+        // HubDispatcher sets this mid-pipeline (only once the code is resolved); CorrelationFilter
+        // doesn't know about it and can't clear it, so the filter that wraps the whole pipeline
+        // does instead - same reasoning as this class already wrapping audit's own try/finally.
+        MDC.remove(HubHeaders.MDC_SERVICE_TYPE);
       }
     }
   }

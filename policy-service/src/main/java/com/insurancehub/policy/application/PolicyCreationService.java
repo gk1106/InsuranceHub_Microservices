@@ -8,6 +8,10 @@ import com.insurancehub.policy.domain.Policy;
 import com.insurancehub.policy.domain.PolicyTerm;
 import com.insurancehub.policy.domain.ProcessedRequest;
 import com.insurancehub.policy.domain.TermType;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class PolicyCreationService {
 
+  private static final Logger log = LoggerFactory.getLogger(PolicyCreationService.class);
   private static final String SERVICE_TYPE = "NewPolicyService";
 
   private final PolicyRepository policies;
@@ -25,17 +30,23 @@ public class PolicyCreationService {
   private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
+  private final Counter policyCreatedCounter;
 
   public PolicyCreationService(
       PolicyRepository policies,
       PolicyTermRepository policyTerms,
       ProcessedRequestRepository processedRequests,
       OutboxAppender outboxAppender,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      MeterRegistry meterRegistry) {
     this.policies = policies;
     this.policyTerms = policyTerms;
     this.processedRequests = processedRequests;
     this.outboxAppender = outboxAppender;
+    this.policyCreatedCounter =
+        Counter.builder("policy_created_total")
+            .description("Policies created (cross-cutting.md §2)")
+            .register(meterRegistry);
     // TransactionTemplate, not @Transactional on doCreate(): calling a @Transactional method
     // on `this` from within this same class would bypass Spring's proxy entirely.
     this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -159,6 +170,12 @@ public class PolicyCreationService {
         cmd.reqId(),
         cmd.inspId(),
         cmd.traceparent());
+
+    log.atInfo()
+        .addKeyValue("event", "POLICY_CREATED")
+        .addKeyValue("policyNum", policy.getPolicyNum())
+        .log("policy created");
+    policyCreatedCounter.increment();
 
     return CreatePolicyResult.created(cmd.txnId(), policy.getPolicyNum());
   }

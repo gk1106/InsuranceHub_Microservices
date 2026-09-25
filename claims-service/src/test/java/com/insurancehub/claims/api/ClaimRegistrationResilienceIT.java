@@ -173,6 +173,7 @@ class ClaimRegistrationResilienceIT {
     headers.set(HubHeaders.REQ_ID, reqId);
     headers.set(HubHeaders.INSP_ID, INSP_ID);
     headers.set(HubHeaders.TXN_ID, "TXN-" + reqId);
+    headers.set(HubHeaders.INTERNAL_AUTH, "local-dev-internal-secret-CHANGE-ME");
     return restTemplate.exchange(
         "/internal/claims",
         HttpMethod.POST,

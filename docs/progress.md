@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **7 — outbox + Kafka events done, awaiting review before phase 8**
+Current phase: **8 — hardening done, awaiting review before phase 9**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -12,7 +12,7 @@ Current phase: **7 — outbox + Kafka events done, awaiting review before phase 
 | 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Done (2 commits) |
 | 6 | hub-gateway crypto: JWS/JWE | Done |
 | 7 | Outbox + Kafka events | Done |
-| 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Not started |
+| 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Done |
 | 9 | AWS: Terraform + centralized logging/monitoring + GitLab CI deploy | Not started |
 
 ## Phase 0 notes
@@ -830,3 +830,111 @@ same-aggregate events land on the same partition; `outbox_pending` tracks live D
 
 `./mvnw -pl hub-common,policy-service,claims-service -am verify` green: full phase 2-4 suite
 unaffected, plus the new outbox suite in both services (4 unit + 3 + 6 IT each).
+
+## Phase 8 notes — hardening (resilience gaps, internal auth, structured logs, tracing, metrics)
+
+Three Explore agents surveyed the live repo before any code was written (Dockerfiles/compose/CI,
+resilience/internal-auth, logging/tracing/metrics/POM state) - the plan was built against
+confirmed current gaps, not assumptions. Full design reasoning lives in
+`docs/adr/0007-internal-service-auth.md` and `docs/adr/0008-observability.md`; not duplicated
+here.
+
+**Internal service auth**: a shared-secret `X-Internal-Auth` header, chosen over a Keycloak
+service JWT (ADR-0007) - hub-gateway's downstream `RestClient`s attach it via a new
+`InternalAuthHeaderInterceptor`; policy-service/claims-service each gained a plain
+`InternalAuthFilter` (not Spring Security - neither service had that dependency, and this phase
+doesn't add it) in front of `/internal/**`, comparing via `MessageDigest.isEqual` (constant-time).
+New `HubErrorCode.INTERNAL_AUTH_FAILED` (401), recorded per the standing rule as
+`docs/open-questions.md` Q16.
+
+**Resilience gap-fill**: claims-service's `PolicyServiceHttpApi` gained the `@Bulkhead` hub-gateway's
+own downstream clients already had; `hub-gateway`/`PolicyServiceClient`/`ClaimsServiceClient` and
+claims-service's own `PolicyCoverageClient` all gained a `BulkheadFullException` catch alongside
+the existing `CallNotPermittedException` one (same "resilience4j said no, don't even try"
+semantic - the omission was a latent gap in already-shipped phase-4/5 code, only found because
+this phase actually added a bulkhead to test against). `server.shutdown: graceful` added to
+hub-gateway (parity with the other two services). All three services' readiness group now
+explicitly includes `db`; hub-gateway's `keyRegistry` inclusion moved from a docker-compose-only
+env var to `application.yml` proper for the non-crypto-off default.
+
+**Structured logging**: a composable `json-logs` profile per service
+(`logging.structured.format.console=logstash`, activated alongside `local` to verify the exact
+prod shape locally, per `logging-and-monitoring.md` §10's own suggested pattern - not baked into
+`local` itself, which stays human-readable). `HubHeaders` gained `MDC_SERVICE_TYPE`, set by
+`HubDispatcher` once the code resolves and cleared by `RequestAuditFilter`'s own `finally` block.
+`RequestAuditFilter` now also emits one structured INFO line per request through a dedicated
+`insurancehub.audit` logger (`logging-and-monitoring.md` §4), alongside its existing
+`request_audit` DB write. `PolicyCreationService`/`PolicyRenewalService`/`ClaimRegistrationService`/
+`ClaimStatusUpdateService` each gained one structured INFO line per business state change
+(`policy created`, `policy renewed`, `claim registered`, `claim status changed` with
+`fromStatus`/`toStatus`) and a matching Micrometer counter.
+
+**Tracing**: Micrometer Tracing + the OpenTelemetry bridge, OTLP export to the compose
+`otel-lgtm` container locally. Two real, independent bugs had to be fixed before a `traceparent`
+header actually reached the wire - both found by a test that inspects the real WireMock-captured
+request, not by inspection or a clean context load:
+1. Boot 4.1.1 moved the actual tracing autoconfiguration (`Tracer`/`Propagator`/`OtlpAutoConfiguration`
+   bean wiring) out of `spring-boot-actuator-autoconfigure` into a new
+   `spring-boot-micrometer-tracing-opentelemetry` artifact - `micrometer-tracing-bridge-otel` +
+   `opentelemetry-exporter-otlp` alone compile and run fine, Observations get created, but no
+   `Tracer` bean ever exists and no `traceparent` is ever injected. Root-caused via a
+   `logging.level.org.springframework.boot.autoconfigure=DEBUG` condition-evaluation report
+   showing zero "Tracing"-named autoconfiguration classes considered at all, then confirmed
+   against `spring-boot-dependencies-4.1.1.pom`'s own dependency-management list. Same
+   modularization pattern already hit for Kafka/Flyway/HTTP-client, just not yet for tracing.
+2. Independently, `PolicyServiceClientConfig`/`ClaimsServiceClientConfig` (both services) built
+   their `RestClient` from the static `RestClient.builder()` factory (deliberate since phase
+   4a/5, for explicit per-client timeouts) instead of the injected, Boot-managed
+   `RestClient.Builder` bean - which is the bean `RestClientAutoConfiguration` actually attaches
+   observation/tracing instrumentation to. Fixed by injecting and building from that bean instead.
+`HubGatewayDispatchIT.policyServiceCallCarriesAnInternalAuthHeaderAndATraceparentHeader` pins
+both fixes together - either one alone still leaves `traceparent` null. Phase 7's
+`traceparent` column/relay-restore plumbing needed zero further changes, exactly as
+`docs/open-questions.md` Q15 originally promised; Q15 is now closed.
+
+**Metrics**: `prometheus` added to `management.endpoints.web.exposure.include`; all three
+services now run actuator on its own `management.server.port` (9080/9081/9082), per
+cross-cutting.md §4 - required updating both Dockerfiles' `HEALTHCHECK` URLs and adding a second
+`EXPOSE`/compose port mapping per service, since `/actuator/**` is no longer reachable on the app
+port at all.
+
+**A third real bug, found by that same port split**: hitting a genuinely unmapped path (which
+`/actuator/health/readiness` on the app port now is) threw `NoResourceFoundException`, and both
+domain services' `@RestControllerAdvice`'s broad `@ExceptionHandler(Exception.class)` catch-all
+turned that into a 500 `INTERNAL_ERROR` instead of a clean 404 - a latent bug in already-shipped
+exception handling, only exposed because nothing had ever hit a truly unmapped path through that
+DispatcherServlet before. Fixed with an explicit `@ExceptionHandler(NoResourceFoundException.class)`
+in both `PolicyExceptionHandler` and `ClaimExceptionHandler`, ahead of the catch-all, returning a
+plain 404 without ERROR-level logging (a stale/wrong URL is not an unexpected failure).
+
+**CI**: `.gitlab-ci.yml`'s `quality` stage gained a `trivy-scan` job (filesystem scan,
+HIGH/CRITICAL fails the build), closing the gap that stage's own comment had named since phase 0.
+A new `.trivyignore` allowlist file exists but is empty - nothing has been triaged yet.
+
+Dockerfiles otherwise needed no changes - multi-stage, layered jars, non-root, `JAVA_TOOL_OPTIONS`
+and a `HEALTHCHECK` were all already in place from phase 0.
+
+New tests: `InternalAuthFilterTest`-equivalent coverage via `HubGatewayDispatchIT`'s new header
+assertion; `ActuatorReadinessIT` (both domain services - proves `db` is really in the readiness
+group via a real HTTP call, and that the app port no longer serves `/actuator/**`);
+`PolicyCreationLoggingIT` (real HTTP call, `OutputCaptureExtension`, logstash JSON format forced
+on, asserts the business-event log line carries `txnId` and never a realistic PII fixture's raw
+values - found and fixed its own bug along the way: a direct bean-to-bean service call bypasses
+`CorrelationFilter` entirely, so MDC/`txnId` never populate unless the call goes over real HTTP).
+
+Not done, called out rather than silently skipped: an equivalent `OutputCaptureExtension` PII
+test for claims-service and hub-gateway (policy-service's proves the pattern works; the other two
+are a mechanical repeat); a bulkhead-saturation/rejection test for claims-service's new bulkhead
+or hub-gateway's pre-existing ones (`HubGatewayResilienceIT` still only covers circuit-breaker
+behavior). Both are reasonable follow-ups, not required for this phase's own "done when" bar.
+
+`./mvnw -pl hub-common,hub-gateway,policy-service,claims-service -am verify` green (confirmed via
+a real captured exit code, not a background-task notification alone, after two prior "green"
+signals turned out to be a shell-pipefail artifact masking real failures - see the two bugs
+above, both caught once verification was done properly): hub-common 75 unit, hub-gateway 79 unit
++ 57 IT, policy-service and claims-service each their existing suite plus the new
+`ActuatorReadinessIT`/`PolicyCreationLoggingIT` (policy-service) additions, all passing.
+
+**Manually verified against the real stack**: not yet done this phase (compose-based trace
+verification in Grafana / `jq`-piped JSON log inspection, per the plan's own verification
+section) - recommended before phase 9, not blocking this review.

@@ -8,6 +8,10 @@ import com.insurancehub.claims.domain.Claim;
 import com.insurancehub.claims.domain.ClaimStatusHistory;
 import com.insurancehub.claims.domain.ProcessedRequest;
 import com.insurancehub.common.error.HubBusinessException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class ClaimRegistrationService {
 
+  private static final Logger log = LoggerFactory.getLogger(ClaimRegistrationService.class);
   private static final String SERVICE_TYPE = "ClaimService";
   private static final String DEFAULT_STATUS = "REGISTERED";
 
@@ -27,6 +32,7 @@ public class ClaimRegistrationService {
   private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
+  private final Counter claimRegisteredCounter;
 
   public ClaimRegistrationService(
       ClaimRepository claims,
@@ -34,12 +40,17 @@ public class ClaimRegistrationService {
       ProcessedRequestRepository processedRequests,
       PolicyCoverageGateway policyCoverageGateway,
       OutboxAppender outboxAppender,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      MeterRegistry meterRegistry) {
     this.claims = claims;
     this.claimStatusHistory = claimStatusHistory;
     this.processedRequests = processedRequests;
     this.policyCoverageGateway = policyCoverageGateway;
     this.outboxAppender = outboxAppender;
+    this.claimRegisteredCounter =
+        Counter.builder("claim_registered_total")
+            .description("Claims registered")
+            .register(meterRegistry);
     // TransactionTemplate, not @Transactional: calling a @Transactional method on `this` from
     // within this same class would bypass Spring's proxy entirely (same reasoning as
     // PolicyCreationService).
@@ -152,6 +163,12 @@ public class ClaimRegistrationService {
         cmd.reqId(),
         cmd.inspId(),
         cmd.traceparent());
+
+    log.atInfo()
+        .addKeyValue("event", "CLAIM_REGISTERED")
+        .addKeyValue("claimNum", claim.getClaimNum())
+        .log("claim registered");
+    claimRegisteredCounter.increment();
 
     return RegisterClaimResult.created(cmd.txnId(), claim.getClaimNum());
   }

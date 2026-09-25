@@ -7,6 +7,9 @@ import com.insurancehub.claims.domain.ClaimStatusHistory;
 import com.insurancehub.claims.domain.ClaimStatusPolicy;
 import com.insurancehub.claims.domain.ProcessedRequest;
 import com.insurancehub.common.error.HubBusinessException;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -16,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class ClaimStatusUpdateService {
 
+  private static final Logger log = LoggerFactory.getLogger(ClaimStatusUpdateService.class);
   private static final String SERVICE_TYPE = "ClaimStatusService";
 
   private final ClaimRepository claims;
@@ -25,6 +29,10 @@ public class ClaimStatusUpdateService {
   private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
+  // cross-cutting.md §2: claim_status_changed_total{to} - the tag value varies per call, so a
+  // single pre-built Counter field (like the other services' policy_created_total) doesn't fit;
+  // MeterRegistry.counter(name, tag...) below looks up/creates the right tagged Counter per call.
+  private final MeterRegistry meterRegistry;
 
   public ClaimStatusUpdateService(
       ClaimRepository claims,
@@ -32,12 +40,14 @@ public class ClaimStatusUpdateService {
       ProcessedRequestRepository processedRequests,
       ClaimStatusPolicy claimStatusPolicy,
       OutboxAppender outboxAppender,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      MeterRegistry meterRegistry) {
     this.claims = claims;
     this.claimStatusHistory = claimStatusHistory;
     this.processedRequests = processedRequests;
     this.claimStatusPolicy = claimStatusPolicy;
     this.outboxAppender = outboxAppender;
+    this.meterRegistry = meterRegistry;
     // TransactionTemplate, not @Transactional: calling a @Transactional method on `this` from
     // within this same class would bypass Spring's proxy entirely (same reasoning as
     // ClaimRegistrationService).
@@ -146,6 +156,14 @@ public class ClaimStatusUpdateService {
         cmd.reqId(),
         cmd.inspId(),
         cmd.traceparent());
+
+    log.atInfo()
+        .addKeyValue("event", "CLAIM_STATUS_CHANGED")
+        .addKeyValue("claimNum", claim.getClaimNum())
+        .addKeyValue("fromStatus", fromStatus)
+        .addKeyValue("toStatus", cmd.claimStatus())
+        .log("claim status changed");
+    meterRegistry.counter("claim_status_changed_total", "to", cmd.claimStatus()).increment();
 
     return UpdateClaimStatusResult.updated(cmd.txnId(), claim.getClaimNum());
   }

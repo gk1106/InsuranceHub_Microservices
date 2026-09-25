@@ -14,6 +14,12 @@ spring:
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
+    template:
+      # cross-cutting.md §2: "Kafka producer observation must be enabled so traces continue
+      # through the outbox relay." Records a span around each OutboxRelay publish; the
+      # traceparent OutboxRelay restores as a Kafka header (phase 7) is a separate mechanism -
+      # this is what makes the *local* publish call itself show up as a span at all.
+      observation-enabled: true
   task:
     scheduling:
       shutdown:
@@ -30,20 +36,34 @@ server:
   shutdown: graceful
 
 management:
+  server:
+    # cross-cutting.md §4: "Actuator is exposed on the management port only." A separate port
+    # (not the app port) so /actuator/** - including /actuator/prometheus, a scrape target - is
+    # never reachable through the same ALB listener/security-group rule as business traffic.
+    port: 9081
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,db
   health:
     livenessstate:
       enabled: true
     readinessstate:
       enabled: true
+  tracing:
+    sampling:
+      # cross-cutting.md §2: "100% locally, 10% in prod." Only local/test profiles exist today
+      # (phase 9 adds a real prod profile) - 1.0 here, a prod override recorded as a to-do in
+      # docs/open-questions.md rather than silently forgotten.
+      probability: 1.0
 
 springdoc:
   api-docs:
@@ -52,6 +72,12 @@ springdoc:
     path: /swagger-ui.html
 
 hub:
+  internal-auth:
+    # docs/adr/0007-internal-service-auth.md. Same literal default across all three services so
+    # ITs (no compose, no env var) work with zero extra wiring; docker-compose.yml sets the same
+    # INTERNAL_AUTH_SECRET on all three for the real stack, phase 9 sources it from Secrets
+    # Manager. This default is not a real secret - never rely on it outside local/test.
+    secret: ${INTERNAL_AUTH_SECRET:local-dev-internal-secret-CHANGE-ME}
   correlation:
     # hub-gateway is the only caller (private subnets, security groups) and always sets
     # X-Req-Id/X-Insp-Id/X-Txn-Id, so it's safe to trust them here. Defaults to false in

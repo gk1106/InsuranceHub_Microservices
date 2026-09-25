@@ -8,6 +8,7 @@ import com.insurancehub.gateway.application.DownstreamErrorDecoder;
 import com.insurancehub.gateway.application.PolicyServiceGateway;
 import com.insurancehub.gateway.application.PolicyServiceResult;
 import com.insurancehub.gateway.application.RenewPolicyCommand;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
@@ -41,7 +42,7 @@ public class PolicyServiceClient implements PolicyServiceGateway {
           response.txnId(), response.replayed(), response.policyNum(), null);
     } catch (HttpStatusCodeException e) {
       throw errorDecoder.decode(e);
-    } catch (CallNotPermittedException | ResourceAccessException e) {
+    } catch (CallNotPermittedException | BulkheadFullException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
   }
@@ -55,7 +56,7 @@ public class PolicyServiceClient implements PolicyServiceGateway {
           response.txnId(), response.replayed(), response.policyNum(), response.termNo());
     } catch (HttpStatusCodeException e) {
       throw errorDecoder.decode(e);
-    } catch (CallNotPermittedException | ResourceAccessException e) {
+    } catch (CallNotPermittedException | BulkheadFullException | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_UNAVAILABLE.errorDesc());
     }
   }

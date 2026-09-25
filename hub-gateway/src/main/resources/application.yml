@@ -10,29 +10,43 @@ spring:
 
 server:
   port: 8080
+  shutdown: graceful
 
 management:
+  server:
+    # cross-cutting.md §4: "Actuator is exposed on the management port only."
+    port: 9080
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
       show-details: never
-      # readiness's own group.include (readinessState + keyRegistry) is deliberately NOT set
-      # here: Boot's HealthContributorMembershipValidator fails startup outright if a named
-      # group member doesn't exist, and keyRegistry only exists when hub.crypto.enabled=true
-      # (KeyRegistryHealthIndicator's own @ConditionalOnProperty) - this file is shared by every
-      # profile, including local's own crypto-off default used by most of the phase 5 IT suite.
-      # Set only where crypto is actually on: docker-compose.yml's hub-gateway environment, and
-      # AbstractHubGatewayCryptoIT's own @DynamicPropertySource (crypto-specific ITs).
+      group:
+        readiness:
+          # db is always safe to include - a DataSource-backed HealthIndicator exists in every
+          # profile. keyRegistry is NOT added here: Boot's HealthContributorMembershipValidator
+          # fails startup outright if a named group member doesn't exist, and keyRegistry only
+          # exists when hub.crypto.enabled=true (KeyRegistryHealthIndicator's own
+          # @ConditionalOnProperty) - this file is shared by every profile, including local's own
+          # crypto-off default used by most of the phase 5 IT suite. keyRegistry is added on top
+          # only where crypto is actually on: docker-compose.yml's hub-gateway environment, and
+          # AbstractHubGatewayCryptoIT's own @DynamicPropertySource (crypto-specific ITs).
+          include: readinessState,db
   health:
     livenessstate:
       enabled: true
     readinessstate:
       enabled: true
+  tracing:
+    sampling:
+      # cross-cutting.md §2: "100% locally, 10% in prod." Only local/test profiles exist today
+      # (phase 9 adds a real prod profile) - 1.0 here, a prod override recorded as a to-do in
+      # docs/open-questions.md rather than silently forgotten.
+      probability: 1.0
 
 springdoc:
   api-docs:
@@ -41,6 +55,12 @@ springdoc:
     path: /swagger-ui.html
 
 hub:
+  internal-auth:
+    # docs/adr/0007-internal-service-auth.md. Same literal default across all three services so
+    # ITs (no compose, no env var) work unmodified; docker-compose.yml sets the same
+    # INTERNAL_AUTH_SECRET on all three for the real stack, and phase 9 sources it from Secrets
+    # Manager. This default is not a real secret - never rely on it outside local/test.
+    secret: ${INTERNAL_AUTH_SECRET:local-dev-internal-secret-CHANGE-ME}
   crypto:
     enabled: true
     # Container-mount path (docker-compose.yml mounts ./.secrets:/secrets:ro into hub-gateway)

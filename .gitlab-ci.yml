@@ -37,7 +37,22 @@ quality:
   script:
     - ./mvnw -B spotless:check
     - ./mvnw -B jacoco:check
-    # Trivy/OWASP dependency-check land in phase 8, with a documented HIGH/CRITICAL allowlist.
+
+# testing-and-deploy.md §4: "a dependency + image scan (Trivy), failing on HIGH/CRITICAL with a
+# documented allowlist." Filesystem mode here (source + resolved Maven deps, the .m2 cache this
+# pipeline already has from the `test` stage) rather than an image scan - the images don't exist
+# yet at this point in the pipeline (package runs after quality). A separate job, not folded into
+# `quality` above, because it needs the aquasec/trivy image instead of the JDK one.
+trivy-scan:
+  stage: quality
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    # --exit-code 1: HIGH/CRITICAL findings fail the pipeline. .trivyignore (repo root) is the
+    # documented allowlist - every entry there needs its own comment explaining why it's
+    # accepted, per this job's own convention.
+    - trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore .
 
 package:
   stage: package

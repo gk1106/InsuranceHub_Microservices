@@ -6,6 +6,7 @@ import static com.insurancehub.common.error.HubErrorCode.POLICY_NOT_FOUND;
 import com.insurancehub.claims.application.CoverageStatus;
 import com.insurancehub.claims.application.PolicyCoverageGateway;
 import com.insurancehub.common.error.HubBusinessException;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import java.time.LocalDate;
 import org.springframework.stereotype.Component;
@@ -35,7 +36,10 @@ public class PolicyCoverageClient implements PolicyCoverageGateway {
       return new CoverageStatus(response.active());
     } catch (HttpClientErrorException.NotFound e) {
       throw new HubBusinessException(POLICY_NOT_FOUND, policyNum);
-    } catch (CallNotPermittedException | HttpServerErrorException | ResourceAccessException e) {
+    } catch (CallNotPermittedException
+        | BulkheadFullException
+        | HttpServerErrorException
+        | ResourceAccessException e) {
       throw new HubBusinessException(DOWNSTREAM_UNAVAILABLE, policyNum);
     }
   }

@@ -61,6 +61,9 @@ public class HubDispatcher {
     // makes. txnId is already there (CorrelationFilter, before this ever ran).
     MDC.put(HubHeaders.MDC_REQ_ID, header.reqId());
     MDC.put(HubHeaders.MDC_INSP_ID, auditContext.inspId());
+    // cross-cutting.md §2/logging-and-monitoring.md §3: every log line should carry serviceType.
+    // Cleared in RequestAuditFilter's finally block, which wraps the whole pipeline.
+    MDC.put(HubHeaders.MDC_SERVICE_TYPE, header.serviceType());
 
     CodeHandler handler = handlers.get(code);
     if (handler == null) {

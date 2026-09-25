@@ -77,8 +77,9 @@ services:
 
   otel-lgtm:
     image: grafana/otel-lgtm:latest
-    # Host-side ports shifted by 1 to avoid a local port clash. Nothing sends traces/metrics to
-    # this yet (that's phase 8), so no other service config references these ports.
+    # Host-side ports shifted by 1 to avoid a local port clash. All three services' local
+    # profile now exports traces here via OTLP HTTP (container-internal otel-lgtm:4318, phase 8)
+    # - the host-side 4328 mapping below is only for a developer to hit the endpoint directly.
     ports:
       - "3001:3000"
       - "4327:4317"
@@ -90,8 +91,13 @@ services:
       dockerfile: policy-service/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: local
+      # Same value on all three services (docs/adr/0007-internal-service-auth.md) - proves the
+      # env var override path actually works, rather than relying on the three base
+      # application.yml files' shared literal default matching by coincidence.
+      INTERNAL_AUTH_SECRET: compose-local-internal-secret-not-for-prod
     ports:
       - "8081:8081"
+      - "9081:9081"
     depends_on:
       mysql:
         condition: service_healthy
@@ -104,8 +110,10 @@ services:
       dockerfile: claims-service/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: local
+      INTERNAL_AUTH_SECRET: compose-local-internal-secret-not-for-prod
     ports:
       - "8082:8082"
+      - "9082:9082"
     depends_on:
       mysql:
         condition: service_healthy
@@ -130,8 +138,11 @@ services:
       # keyRegistry only exists as a health contributor when crypto is on - Boot fails startup
       # if a health group names a contributor that doesn't exist, so this can't live in the
       # shared application.yml (most of the phase 5 IT suite runs crypto off). Real here since
-      # crypto really is on for the compose stack.
-      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,keyRegistry
+      # crypto really is on for the compose stack. db is also included here (on top of
+      # application.yml's own readinessState,db default) purely so this override stays the
+      # single source of truth for the real stack's full readiness set.
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,keyRegistry
+      INTERNAL_AUTH_SECRET: compose-local-internal-secret-not-for-prod
     volumes:
       # Populated by scripts/gen-dev-keys.sh (git-ignored, never committed) - read-only, the
       # container never writes here.
@@ -139,6 +150,7 @@ services:
     ports:
       # Host-side 8090 to avoid a local port clash; internal port stays 8080.
       - "8090:8080"
+      - "9080:9080"
     depends_on:
       keycloak:
         condition: service_healthy

@@ -14,6 +14,7 @@ import com.insurancehub.policy.domain.Policy;
 import com.insurancehub.policy.domain.PolicyTerm;
 import com.insurancehub.policy.domain.ProcessedRequest;
 import com.insurancehub.policy.domain.TermType;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -50,7 +51,12 @@ class PolicyRenewalServiceTest {
     when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
     service =
         new PolicyRenewalService(
-            policies, policyTerms, processedRequests, outboxAppender, transactionManager);
+            policies,
+            policyTerms,
+            processedRequests,
+            outboxAppender,
+            transactionManager,
+            new SimpleMeterRegistry());
 
     when(policies.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
     when(policyTerms.save(any(PolicyTerm.class))).thenAnswer(inv -> inv.getArgument(0));

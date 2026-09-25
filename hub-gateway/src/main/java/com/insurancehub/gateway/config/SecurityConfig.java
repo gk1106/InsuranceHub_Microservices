@@ -85,6 +85,11 @@ public class SecurityConfig {
     http.authorizeHttpRequests(
             authorize ->
                 authorize
+                    // Phase 8 moved actuator to its own management.server.port
+                    // (cross-cutting.md §4), so this main-context filter chain no longer even
+                    // sees /actuator/** requests - left permitAll anyway as harmless, accurate
+                    // documentation of intent, and so nothing breaks if management.server.port
+                    // is ever removed again.
                     .requestMatchers("/actuator/health/**", "/actuator/info")
                     .permitAll()
                     .anyRequest()

@@ -1,0 +1,6 @@
+# Trivy HIGH/CRITICAL allowlist for the trivy-scan CI job (.gitlab-ci.yml, quality stage).
+# Every entry below needs its own comment: which CVE, which dependency, why it's accepted here
+# (e.g. not reachable from our code paths, a fix isn't out yet and the exposure is mitigated
+# some other way, etc.) and who/when reviewed it. Empty today - nothing has been triaged yet
+# because this job is new in phase 8; add entries here only after a real scan finding is
+# reviewed, never preemptively.

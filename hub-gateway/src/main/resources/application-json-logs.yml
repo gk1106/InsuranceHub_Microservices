@@ -1,0 +1,11 @@
+logging:
+  structured:
+    format:
+      console: logstash
+
+# logging-and-monitoring.md §3/§10: logstash format promotes MDC entries (txnId, reqId, inspId,
+# serviceType, plus traceId/spanId once tracing is added) to top-level JSON keys, which is what
+# lets CloudWatch Logs Insights query them with no parsing. A separate composable profile, not
+# baked into `local`/`dev`/`prod` directly, so it can be verified locally exactly as
+# logging-and-monitoring.md §10 describes: SPRING_PROFILES_ACTIVE=local,json-logs, piped
+# through jq - without permanently losing local's human-readable console output for everyday dev.

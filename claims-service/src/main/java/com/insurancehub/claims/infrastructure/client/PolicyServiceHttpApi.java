@@ -1,5 +1,6 @@
 package com.insurancehub.claims.infrastructure.client;
 
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import java.time.LocalDate;
@@ -28,6 +29,10 @@ public interface PolicyServiceHttpApi {
 
   @CircuitBreaker(name = "policyService")
   @Retry(name = "policyService")
+  // Phase 8 gap-fill: hub-gateway's own downstream clients already had a bulkhead
+  // (cross-cutting.md §6); this one didn't. Bounds concurrent in-flight coverage calls so one
+  // slow policy-service instance can't exhaust claims-service's own request-handling capacity.
+  @Bulkhead(name = "policyService")
   @GetExchange("/internal/policies/{policyNum}/coverage")
   PolicyCoverageResponse getCoverage(
       @PathVariable String policyNum,

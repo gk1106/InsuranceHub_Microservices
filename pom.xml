@@ -42,6 +42,11 @@
          dispatch both work with no extra AOP dependency. -->
     <resilience4j.version>2.4.0</resilience4j.version>
 
+    <!-- No explicit version: spring-boot-dependencies (the BOM this parent inherits from
+         spring-boot-starter-parent) manages both micrometer-tracing-bom and opentelemetry-bom
+         imports, so pinning a version here would fight the BOM instead of using it - confirmed
+         by dependency:tree during implementation (phase 8), not assumed. -->
+
     <spotless.version>3.0.0</spotless.version>
     <jacoco.version>0.8.13</jacoco.version>
     <!-- Domain + application packages are the coverage-gated code; see docs/adr/0001-tech-stack.md -->

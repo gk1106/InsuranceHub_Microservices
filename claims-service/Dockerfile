@@ -18,8 +18,9 @@ COPY --from=build /workspace/extracted/application/ ./
 USER spring:spring
 
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
-EXPOSE 8082
+EXPOSE 8082 9082
+# Phase 8: actuator lives on its own management.server.port (cross-cutting.md §4), not 8082.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
-  CMD curl -f http://localhost:8082/actuator/health/readiness || exit 1
+  CMD curl -f http://localhost:9082/actuator/health/readiness || exit 1
 
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

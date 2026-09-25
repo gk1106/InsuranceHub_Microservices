@@ -5,3 +5,8 @@ spring:
     password: ${CLAIMS_DB_PASSWORD:claims_app}
   kafka:
     bootstrap-servers: kafka:9092
+
+management:
+  otlp:
+    tracing:
+      endpoint: http://otel-lgtm:4318/v1/traces

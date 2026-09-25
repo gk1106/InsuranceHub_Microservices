@@ -40,6 +40,31 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
+    <!-- cross-cutting.md §2: Micrometer Tracing with the OpenTelemetry bridge and OTLP
+         exporter. No explicit version - managed by spring-boot-dependencies' own
+         micrometer-tracing-bom/opentelemetry-bom imports (see parent pom.xml comment).
+         spring-boot-micrometer-tracing-opentelemetry is NOT optional here - Boot 4.1.1 moved
+         the tracing autoconfiguration classes themselves (TracingAutoConfiguration,
+         OtlpAutoConfiguration, the Tracer/Propagator bean wiring) out of
+         spring-boot-actuator-autoconfigure into this dedicated artifact, same modularization
+         pattern already hit for Kafka/Flyway/HTTP-client. Without it, ObservationRegistry and
+         the RestClient/WebMvc *Observation*AutoConfiguration classes are still present and
+         active (spring-boot-starter-actuator alone provides those), but no Tracer bean ever
+         exists, so no traceparent header is ever actually injected - confirmed by a real
+         @SpringBootTest context's condition-evaluation report showing zero tracing-autoconfig
+         classes considered at all, not assumed. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+    </dependency>
     <!-- Boot 4.1.1 split Kafka autoconfiguration (KafkaTemplate, KafkaAdmin/NewTopic bean
          support) into its own spring-boot-kafka artifact, same modularization pattern already
          hit for health/jackson/flyway/http-client - spring-kafka alone gets you the classes but

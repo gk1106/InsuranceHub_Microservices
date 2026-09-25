@@ -110,14 +110,28 @@ meaningfully extending how long an expired token keeps working. Found via
 60-second default, a token that had expired 3 seconds earlier was still authenticating
 successfully. Affects phase 5 (`SecurityConfig`'s `JwtDecoder` bean).
 
-## Q15 — `traceparent` propagation is wired but not yet real (phase 7 scope boundary)
-Not a spec gap - a deliberate phase-boundary decision, recorded here because it affects what a
-reviewer should expect to see working today. `outbox_event.traceparent` and the relay's
-restore-as-Kafka-header logic exist now (phase 7), but nothing in this codebase sends a real
-`traceparent` header yet - no Micrometer Tracing dependency exists in any module until phase 8.
-Policy-service/claims-service's internal `POST`/`PATCH` endpoints already accept an optional
-`traceparent` request header and thread it through to the outbox row, so this is pure
-pass-through plumbing: it does nothing observable today (the column is always `NULL`), and needs
-zero code changes once phase 8 adds real tracing - Micrometer's own standard W3C Trace Context
-propagation will simply start populating the header these endpoints already read. Affects phase
-7 (`OutboxAppender`, `OutboxRelay`) and is closed once phase 8 lands.
+## Q15 — `traceparent` propagation is wired but not yet real (phase 7 scope boundary) — CLOSED
+Closed in phase 8: Micrometer Tracing now sends a real `traceparent` header on hub-gateway's
+downstream calls (verified via `HubGatewayDispatchIT
+.policyServiceCallCarriesAnInternalAuthHeaderAndATraceparentHeader`, a real WireMock-captured
+header, not just config), and it reaches `OutboxAppender`/`OutboxRelay` with zero code changes,
+exactly as this entry originally promised. See `docs/adr/0008-observability.md` for the one real
+fix that was needed (manually-built `RestClient`s bypassing Micrometer's instrumentation).
+
+## Q16 — `INTERNAL_AUTH_FAILED` (401) is a project-defined respCode
+
+**Assumption**: project-defined, same treatment as Q10/Q11/Q12. Not in the bank's
+`api-contract.md` §5 catalogue — it can never reach an insurer anyway (it's only ever returned
+by policy-service/claims-service's internal `/internal/**` endpoints to hub-gateway itself, per
+`docs/adr/0007-internal-service-auth.md`; a real occurrence means a misconfigured
+`INTERNAL_AUTH_SECRET`, not something an insurer request can trigger), but recorded here per the
+standing rule anyway. Affects phase 8 (`InternalAuthFilter`, both domain services).
+
+## Q17 — Tracing sample rate in `prod` is a deferred property, not yet wired to a real profile
+
+Not a spec gap - `cross-cutting.md` §2 says "100% locally, 10% in prod," and phase 8 sets
+`management.tracing.sampling.probability: 1.0` in all three services' base `application.yml`
+(the only profiles that exist today are `local`/`test`). No `application-prod.yml` exists yet -
+phase 9 creates it, and that is when the 10% override should be added
+(`management.tracing.sampling.probability: 0.1`). Flagged here so it isn't silently forgotten
+when phase 9 scaffolds the prod profile. Affects phase 9.

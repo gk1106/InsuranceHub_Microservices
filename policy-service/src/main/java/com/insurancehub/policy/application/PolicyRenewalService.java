@@ -8,8 +8,12 @@ import com.insurancehub.common.error.HubBusinessException;
 import com.insurancehub.policy.domain.PolicyTerm;
 import com.insurancehub.policy.domain.ProcessedRequest;
 import com.insurancehub.policy.domain.TermType;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Comparator;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -19,6 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class PolicyRenewalService {
 
+  private static final Logger log = LoggerFactory.getLogger(PolicyRenewalService.class);
   private static final String SERVICE_TYPE = "RenewalService";
 
   private final PolicyRepository policies;
@@ -27,17 +32,23 @@ public class PolicyRenewalService {
   private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
+  private final Counter policyRenewedCounter;
 
   public PolicyRenewalService(
       PolicyRepository policies,
       PolicyTermRepository policyTerms,
       ProcessedRequestRepository processedRequests,
       OutboxAppender outboxAppender,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      MeterRegistry meterRegistry) {
     this.policies = policies;
     this.policyTerms = policyTerms;
     this.processedRequests = processedRequests;
     this.outboxAppender = outboxAppender;
+    this.policyRenewedCounter =
+        Counter.builder("policy_renewed_total")
+            .description("Policies renewed")
+            .register(meterRegistry);
     this.transactionTemplate = new TransactionTemplate(transactionManager);
     this.recoveryTransactionTemplate = new TransactionTemplate(transactionManager);
     this.recoveryTransactionTemplate.setPropagationBehavior(
@@ -171,6 +182,13 @@ public class PolicyRenewalService {
         cmd.reqId(),
         cmd.inspId(),
         cmd.traceparent());
+
+    log.atInfo()
+        .addKeyValue("event", "POLICY_RENEWED")
+        .addKeyValue("policyNum", cmd.policyNum())
+        .addKeyValue("termNo", newTermNo)
+        .log("policy renewed");
+    policyRenewedCounter.increment();
 
     return RenewPolicyResult.created(cmd.txnId(), cmd.policyNum(), newTermNo);
   }

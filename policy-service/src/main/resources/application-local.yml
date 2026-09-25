@@ -5,3 +5,10 @@ spring:
     password: ${POLICY_DB_PASSWORD:policy_app}
   kafka:
     bootstrap-servers: kafka:9092
+
+management:
+  otlp:
+    tracing:
+      # otel-lgtm's OTLP HTTP port, container-internal (compose maps it to host 4328 - see
+      # docker-compose.yml's own comment - but services reach it as otel-lgtm:4318).
+      endpoint: http://otel-lgtm:4318/v1/traces

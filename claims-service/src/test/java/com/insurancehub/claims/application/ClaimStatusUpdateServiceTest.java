@@ -14,6 +14,7 @@ import com.insurancehub.claims.domain.ClaimStatusPolicy;
 import com.insurancehub.claims.domain.ProcessedRequest;
 import com.insurancehub.common.error.HubBusinessException;
 import com.insurancehub.common.error.HubErrorCode;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +60,8 @@ class ClaimStatusUpdateServiceTest {
             processedRequests,
             claimStatusPolicy,
             outboxAppender,
-            transactionManager);
+            transactionManager,
+            new SimpleMeterRegistry());
 
     when(claims.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
     when(claimStatusHistory.save(any(ClaimStatusHistory.class)))

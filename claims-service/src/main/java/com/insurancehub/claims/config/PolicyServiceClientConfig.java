@@ -1,5 +1,6 @@
 package com.insurancehub.claims.config;
 
+import com.insurancehub.claims.infrastructure.client.InternalAuthHeaderInterceptor;
 import com.insurancehub.claims.infrastructure.client.PolicyServiceHttpApi;
 import com.insurancehub.common.web.CorrelationPropagationInterceptor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -12,16 +13,28 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.support.RestClientAdapter;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 
-// Built manually, not via Boot's autoconfigured RestClient.Builder - this client needs its own
-// explicit connect/read timeouts (cross-cutting.md §6), which is most directly expressed by
-// building the request factory here rather than layering property-driven customization onto an
-// autoconfigured default.
+// Built from the injected RestClient.Builder bean (not a bare RestClient.builder()), so this
+// client gets its own explicit connect/read timeouts (cross-cutting.md §6) *and* keeps whatever
+// auto-instrumentation Boot applies to that bean - phase 8 found this client was bypassing
+// Micrometer's client-side observation instrumentation entirely by starting from
+// RestClient.builder() instead of the injected builder bean; fixed here so an outbound call
+// actually carries a traceparent header once tracing is added.
+// Single-class @EnableConfigurationProperties only - phase 8 found the array form
+// ({A.class, B.class}) breaks annotation-metadata resolution at context-refresh time under this
+// Boot version (IllegalArgumentException: Could not find class [PolicyServiceClientProperties],
+// surfaced only by a real @SpringBootTest context load, not by compilation). InternalAuthProperties
+// is registered by InternalAuthFilterConfig instead (same module) - Spring dedupes
+// @ConfigurationProperties bean registration by type, so declaring it there is enough for it to
+// be injectable here too.
 @Configuration
 @EnableConfigurationProperties(PolicyServiceClientProperties.class)
 public class PolicyServiceClientConfig {
 
   @Bean
-  RestClient policyServiceRestClient(PolicyServiceClientProperties properties) {
+  RestClient policyServiceRestClient(
+      RestClient.Builder builder,
+      PolicyServiceClientProperties properties,
+      InternalAuthProperties internalAuthProperties) {
     // Boot 4.1.1 renamed ClientHttpRequestFactorySettings to HttpClientSettings (found at
     // compile time - the old name doesn't exist in spring-boot-http-client 4.1.1).
     HttpClientSettings settings =
@@ -30,12 +43,13 @@ public class PolicyServiceClientConfig {
             .withReadTimeout(properties.readTimeout());
     ClientHttpRequestFactory requestFactory =
         ClientHttpRequestFactoryBuilder.detect().build(settings);
-    return RestClient.builder()
+    return builder
         .baseUrl(properties.baseUrl())
         .requestFactory(requestFactory)
         // Propagates the current request's reqId/inspId/txnId onto the outgoing call so
         // policy-service's CorrelationFilter sees the same correlation values.
         .requestInterceptor(new CorrelationPropagationInterceptor())
+        .requestInterceptor(new InternalAuthHeaderInterceptor(internalAuthProperties.secret()))
         .build();
   }
 

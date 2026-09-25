@@ -40,6 +40,23 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
+    <!-- cross-cutting.md §2: Micrometer Tracing with the OpenTelemetry bridge and OTLP
+         exporter. No explicit version - managed by spring-boot-dependencies' own
+         micrometer-tracing-bom/opentelemetry-bom imports (see parent pom.xml comment).
+         spring-boot-micrometer-tracing-opentelemetry is NOT optional - see policy-service's own
+         pom.xml comment for the real Boot 4.1.1 modularization finding this was needed for. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+    </dependency>
     <dependency>
       <!-- Signature verification (JWS) and decryption (JWE) of the insurer envelope; phase 6. -->
       <groupId>com.nimbusds</groupId>
