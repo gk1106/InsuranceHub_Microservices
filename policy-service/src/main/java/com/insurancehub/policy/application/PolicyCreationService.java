@@ -22,6 +22,7 @@ public class PolicyCreationService {
   private final PolicyRepository policies;
   private final PolicyTermRepository policyTerms;
   private final ProcessedRequestRepository processedRequests;
+  private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
 
@@ -29,10 +30,12 @@ public class PolicyCreationService {
       PolicyRepository policies,
       PolicyTermRepository policyTerms,
       ProcessedRequestRepository processedRequests,
+      OutboxAppender outboxAppender,
       PlatformTransactionManager transactionManager) {
     this.policies = policies;
     this.policyTerms = policyTerms;
     this.processedRequests = processedRequests;
+    this.outboxAppender = outboxAppender;
     // TransactionTemplate, not @Transactional on doCreate(): calling a @Transactional method
     // on `this` from within this same class would bypass Spring's proxy entirely.
     this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -136,6 +139,26 @@ public class PolicyCreationService {
     processedRequests.save(
         ProcessedRequest.of(
             cmd.inspId(), cmd.reqId(), SERVICE_TYPE, cmd.txnId(), policy.getPolicyNum()));
+
+    outboxAppender.append(
+        "Policy",
+        policy.getPolicyNum(),
+        "PolicyCreated",
+        new PolicyCreatedData(
+            policy.getPolicyNum(),
+            1,
+            cmd.insuranceType(),
+            cmd.applicationStatus(),
+            cmd.issueDate(),
+            cmd.startDate(),
+            cmd.expiryDate(),
+            cmd.netPremium(),
+            cmd.grossPremium(),
+            cmd.sumInsured()),
+        cmd.txnId(),
+        cmd.reqId(),
+        cmd.inspId(),
+        cmd.traceparent());
 
     return CreatePolicyResult.created(cmd.txnId(), policy.getPolicyNum());
   }

@@ -7,9 +7,27 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  kafka:
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+  task:
+    scheduling:
+      shutdown:
+        # server.shutdown=graceful only drains Tomcat's own request-handling pool - it does not,
+        # by itself, wait for an in-flight @Scheduled OutboxRelay tick to finish. Without this,
+        # a rolling deploy (phase 9) could cut a tick off mid-batch; the relay's own single
+        # wrapping transaction already makes that data-safe (nothing partially commits), but
+        # this avoids the unnecessary rollback/retry churn on every deploy.
+        await-termination: true
+        await-termination-period: 10s
 
 server:
   port: 8081
+  shutdown: graceful
 
 management:
   endpoints:
@@ -39,3 +57,17 @@ hub:
     # X-Req-Id/X-Insp-Id/X-Txn-Id, so it's safe to trust them here. Defaults to false in
     # hub-common - this must stay explicit.
     trust-inbound-headers: true
+
+outbox:
+  relay:
+    batch-size: 100
+    send-timeout: 5s
+    # alert-attempts: still retried every 500ms past this, but each further failure logs at
+    # ERROR instead of WARN (a phase-9 CloudWatch metric filter turns that into a page) -
+    # ~1 minute of continuous retries at the fixed 500ms delay.
+    alert-attempts: 120
+    # max-attempts: the much-higher safety valve that finally excludes a row from the relay's
+    # own SELECT (~8 minutes) - never hit by a normal broker blip, only by a payload that will
+    # truly never succeed (docs/adr/0006-outbox-relay.md).
+    max-attempts: 1000
+    topic: insurancehub.policy.events.v1

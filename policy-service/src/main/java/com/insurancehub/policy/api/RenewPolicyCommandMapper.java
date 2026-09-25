@@ -11,5 +11,10 @@ import org.mapstruct.Mapper;
 public interface RenewPolicyCommandMapper {
 
   RenewPolicyCommand toCommand(
-      RenewPolicyRequest request, String policyNum, String reqId, String inspId, String txnId);
+      RenewPolicyRequest request,
+      String policyNum,
+      String reqId,
+      String inspId,
+      String txnId,
+      String traceparent);
 }

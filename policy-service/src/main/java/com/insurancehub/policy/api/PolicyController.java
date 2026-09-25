@@ -46,9 +46,11 @@ public class PolicyController {
       @RequestBody @Valid CreatePolicyRequest request,
       @RequestHeader(HubHeaders.REQ_ID) String reqId,
       @RequestHeader(HubHeaders.INSP_ID) String inspId,
-      @RequestHeader(HubHeaders.TXN_ID) String txnId) {
+      @RequestHeader(HubHeaders.TXN_ID) String txnId,
+      @RequestHeader(value = "traceparent", required = false) String traceparent) {
     var result =
-        policyCreationService.create(createMapper.toCommand(request, reqId, inspId, txnId));
+        policyCreationService.create(
+            createMapper.toCommand(request, reqId, inspId, txnId, traceparent));
     var body = new CreatePolicyResponse(result.txnId(), result.replayed(), result.policyNum());
     // 201 for a real creation, 200 for a replay (nothing new was created).
     var status = result.replayed() ? HttpStatus.OK : HttpStatus.CREATED;
@@ -61,9 +63,11 @@ public class PolicyController {
       @RequestBody @Valid RenewPolicyRequest request,
       @RequestHeader(HubHeaders.REQ_ID) String reqId,
       @RequestHeader(HubHeaders.INSP_ID) String inspId,
-      @RequestHeader(HubHeaders.TXN_ID) String txnId) {
+      @RequestHeader(HubHeaders.TXN_ID) String txnId,
+      @RequestHeader(value = "traceparent", required = false) String traceparent) {
     var result =
-        policyRenewalService.renew(renewMapper.toCommand(request, policyNum, reqId, inspId, txnId));
+        policyRenewalService.renew(
+            renewMapper.toCommand(request, policyNum, reqId, inspId, txnId, traceparent));
     var body =
         new RenewPolicyResponse(
             result.txnId(), result.replayed(), result.policyNum(), result.termNo());

@@ -10,6 +10,7 @@ public record RenewPolicyCommand(
     String reqId,
     String inspId,
     String txnId,
+    String traceparent,
     String policyNum,
     String applicationNum,
     String cif,

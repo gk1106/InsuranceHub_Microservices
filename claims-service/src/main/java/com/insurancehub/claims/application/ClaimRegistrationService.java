@@ -24,6 +24,7 @@ public class ClaimRegistrationService {
   private final ClaimStatusHistoryRepository claimStatusHistory;
   private final ProcessedRequestRepository processedRequests;
   private final PolicyCoverageGateway policyCoverageGateway;
+  private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
 
@@ -32,11 +33,13 @@ public class ClaimRegistrationService {
       ClaimStatusHistoryRepository claimStatusHistory,
       ProcessedRequestRepository processedRequests,
       PolicyCoverageGateway policyCoverageGateway,
+      OutboxAppender outboxAppender,
       PlatformTransactionManager transactionManager) {
     this.claims = claims;
     this.claimStatusHistory = claimStatusHistory;
     this.processedRequests = processedRequests;
     this.policyCoverageGateway = policyCoverageGateway;
+    this.outboxAppender = outboxAppender;
     // TransactionTemplate, not @Transactional: calling a @Transactional method on `this` from
     // within this same class would bypass Spring's proxy entirely (same reasoning as
     // PolicyCreationService).
@@ -132,6 +135,23 @@ public class ClaimRegistrationService {
     processedRequests.save(
         ProcessedRequest.of(
             cmd.inspId(), cmd.reqId(), SERVICE_TYPE, cmd.txnId(), claim.getClaimNum()));
+
+    outboxAppender.append(
+        "Claim",
+        claim.getClaimNum(),
+        "ClaimRegistered",
+        new ClaimRegisteredData(
+            claim.getClaimNum(),
+            claim.getPolicyNum(),
+            cmd.claimType(),
+            cmd.dateOfLoss(),
+            cmd.intimationDate(),
+            cmd.claimedAmt(),
+            status),
+        cmd.txnId(),
+        cmd.reqId(),
+        cmd.inspId(),
+        cmd.traceparent());
 
     return RegisterClaimResult.created(cmd.txnId(), claim.getClaimNum());
   }

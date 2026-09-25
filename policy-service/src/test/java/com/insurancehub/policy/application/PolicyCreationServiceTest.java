@@ -35,6 +35,7 @@ class PolicyCreationServiceTest {
   private PolicyRepository policies;
   private PolicyTermRepository policyTerms;
   private ProcessedRequestRepository processedRequests;
+  private OutboxAppender outboxAppender;
   private PolicyCreationService service;
 
   @BeforeEach
@@ -42,11 +43,13 @@ class PolicyCreationServiceTest {
     policies = mock(PolicyRepository.class);
     policyTerms = mock(PolicyTermRepository.class);
     processedRequests = mock(ProcessedRequestRepository.class);
+    outboxAppender = mock(OutboxAppender.class);
     PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     TransactionStatus status = mock(TransactionStatus.class);
     when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
     service =
-        new PolicyCreationService(policies, policyTerms, processedRequests, transactionManager);
+        new PolicyCreationService(
+            policies, policyTerms, processedRequests, outboxAppender, transactionManager);
 
     when(policies.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
     when(policyTerms.save(any(PolicyTerm.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -178,6 +181,7 @@ class PolicyCreationServiceTest {
         REQ_ID,
         INSP_ID,
         TXN_ID,
+        null, // traceparent
         POLICY_NUM,
         "APP1",
         "CIF1",

@@ -37,6 +37,7 @@ class ClaimRegistrationServiceTest {
   private ClaimStatusHistoryRepository claimStatusHistory;
   private ProcessedRequestRepository processedRequests;
   private PolicyCoverageGateway policyCoverageGateway;
+  private OutboxAppender outboxAppender;
   private ClaimRegistrationService service;
 
   @BeforeEach
@@ -45,6 +46,7 @@ class ClaimRegistrationServiceTest {
     claimStatusHistory = mock(ClaimStatusHistoryRepository.class);
     processedRequests = mock(ProcessedRequestRepository.class);
     policyCoverageGateway = mock(PolicyCoverageGateway.class);
+    outboxAppender = mock(OutboxAppender.class);
     PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     TransactionStatus status = mock(TransactionStatus.class);
     when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
@@ -54,6 +56,7 @@ class ClaimRegistrationServiceTest {
             claimStatusHistory,
             processedRequests,
             policyCoverageGateway,
+            outboxAppender,
             transactionManager);
 
     when(claims.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -186,6 +189,7 @@ class ClaimRegistrationServiceTest {
         REQ_ID,
         INSP_ID,
         TXN_ID,
+        null, // traceparent
         POLICY_NUM,
         CLAIM_NUM,
         "ACCIDENT",

@@ -22,6 +22,7 @@ public class ClaimStatusUpdateService {
   private final ClaimStatusHistoryRepository claimStatusHistory;
   private final ProcessedRequestRepository processedRequests;
   private final ClaimStatusPolicy claimStatusPolicy;
+  private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
 
@@ -30,11 +31,13 @@ public class ClaimStatusUpdateService {
       ClaimStatusHistoryRepository claimStatusHistory,
       ProcessedRequestRepository processedRequests,
       ClaimStatusPolicy claimStatusPolicy,
+      OutboxAppender outboxAppender,
       PlatformTransactionManager transactionManager) {
     this.claims = claims;
     this.claimStatusHistory = claimStatusHistory;
     this.processedRequests = processedRequests;
     this.claimStatusPolicy = claimStatusPolicy;
+    this.outboxAppender = outboxAppender;
     // TransactionTemplate, not @Transactional: calling a @Transactional method on `this` from
     // within this same class would bypass Spring's proxy entirely (same reasoning as
     // ClaimRegistrationService).
@@ -126,6 +129,23 @@ public class ClaimStatusUpdateService {
     processedRequests.save(
         ProcessedRequest.of(
             cmd.inspId(), cmd.reqId(), SERVICE_TYPE, cmd.txnId(), claim.getClaimNum()));
+
+    outboxAppender.append(
+        "Claim",
+        claim.getClaimNum(),
+        "ClaimStatusChanged",
+        new ClaimStatusChangedData(
+            claim.getClaimNum(),
+            claim.getPolicyNum(),
+            fromStatus,
+            cmd.claimStatus(),
+            cmd.settledAmt(),
+            cmd.claimCode(),
+            cmd.finalizationDate()),
+        cmd.txnId(),
+        cmd.reqId(),
+        cmd.inspId(),
+        cmd.traceparent());
 
     return UpdateClaimStatusResult.updated(cmd.txnId(), claim.getClaimNum());
   }

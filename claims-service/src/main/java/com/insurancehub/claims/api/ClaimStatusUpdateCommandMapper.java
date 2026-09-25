@@ -11,5 +11,10 @@ import org.mapstruct.Mapper;
 public interface ClaimStatusUpdateCommandMapper {
 
   UpdateClaimStatusCommand toCommand(
-      UpdateClaimStatusRequest request, String claimNum, String reqId, String inspId, String txnId);
+      UpdateClaimStatusRequest request,
+      String claimNum,
+      String reqId,
+      String inspId,
+      String txnId,
+      String traceparent);
 }

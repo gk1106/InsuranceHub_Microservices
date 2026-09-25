@@ -10,6 +10,7 @@ public record UpdateClaimStatusCommand(
     String reqId,
     String inspId,
     String txnId,
+    String traceparent,
     String claimNum,
     String policyNum,
     String claimStatus,

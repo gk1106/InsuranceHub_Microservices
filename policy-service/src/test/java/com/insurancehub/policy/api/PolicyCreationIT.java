@@ -294,6 +294,7 @@ class PolicyCreationIT {
         reqId,
         INSP_ID,
         txnId,
+        null, // traceparent
         policyNum,
         "APP1",
         "CIF456789",

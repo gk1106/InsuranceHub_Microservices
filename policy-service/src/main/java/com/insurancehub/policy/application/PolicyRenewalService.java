@@ -24,6 +24,7 @@ public class PolicyRenewalService {
   private final PolicyRepository policies;
   private final PolicyTermRepository policyTerms;
   private final ProcessedRequestRepository processedRequests;
+  private final OutboxAppender outboxAppender;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate recoveryTransactionTemplate;
 
@@ -31,10 +32,12 @@ public class PolicyRenewalService {
       PolicyRepository policies,
       PolicyTermRepository policyTerms,
       ProcessedRequestRepository processedRequests,
+      OutboxAppender outboxAppender,
       PlatformTransactionManager transactionManager) {
     this.policies = policies;
     this.policyTerms = policyTerms;
     this.processedRequests = processedRequests;
+    this.outboxAppender = outboxAppender;
     this.transactionTemplate = new TransactionTemplate(transactionManager);
     this.recoveryTransactionTemplate = new TransactionTemplate(transactionManager);
     this.recoveryTransactionTemplate.setPropagationBehavior(
@@ -148,6 +151,26 @@ public class PolicyRenewalService {
     processedRequests.save(
         ProcessedRequest.of(
             cmd.inspId(), cmd.reqId(), SERVICE_TYPE, cmd.txnId(), String.valueOf(newTermNo)));
+
+    outboxAppender.append(
+        "Policy",
+        cmd.policyNum(),
+        "PolicyRenewed",
+        new PolicyRenewedData(
+            cmd.policyNum(),
+            newTermNo,
+            cmd.insuranceType(),
+            cmd.applicationStatus(),
+            cmd.issueDate(),
+            cmd.startDate(),
+            cmd.expiryDate(),
+            cmd.netPremium(),
+            cmd.grossPremium(),
+            cmd.sumInsured()),
+        cmd.txnId(),
+        cmd.reqId(),
+        cmd.inspId(),
+        cmd.traceparent());
 
     return RenewPolicyResult.created(cmd.txnId(), cmd.policyNum(), newTermNo);
   }

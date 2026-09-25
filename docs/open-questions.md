@@ -109,3 +109,15 @@ meaningfully extending how long an expired token keeps working. Found via
 `HubGatewaySecurityIT.expiredTokenIsRejectedAsTokenExpired` against real Keycloak: with the
 60-second default, a token that had expired 3 seconds earlier was still authenticating
 successfully. Affects phase 5 (`SecurityConfig`'s `JwtDecoder` bean).
+
+## Q15 — `traceparent` propagation is wired but not yet real (phase 7 scope boundary)
+Not a spec gap - a deliberate phase-boundary decision, recorded here because it affects what a
+reviewer should expect to see working today. `outbox_event.traceparent` and the relay's
+restore-as-Kafka-header logic exist now (phase 7), but nothing in this codebase sends a real
+`traceparent` header yet - no Micrometer Tracing dependency exists in any module until phase 8.
+Policy-service/claims-service's internal `POST`/`PATCH` endpoints already accept an optional
+`traceparent` request header and thread it through to the outbox row, so this is pure
+pass-through plumbing: it does nothing observable today (the column is always `NULL`), and needs
+zero code changes once phase 8 adds real tracing - Micrometer's own standard W3C Trace Context
+propagation will simply start populating the header these endpoints already read. Affects phase
+7 (`OutboxAppender`, `OutboxRelay`) and is closed once phase 8 lands.

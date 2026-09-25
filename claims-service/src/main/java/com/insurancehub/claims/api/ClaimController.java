@@ -39,10 +39,11 @@ public class ClaimController {
       @RequestBody @Valid RegisterClaimRequest request,
       @RequestHeader(HubHeaders.REQ_ID) String reqId,
       @RequestHeader(HubHeaders.INSP_ID) String inspId,
-      @RequestHeader(HubHeaders.TXN_ID) String txnId) {
+      @RequestHeader(HubHeaders.TXN_ID) String txnId,
+      @RequestHeader(value = "traceparent", required = false) String traceparent) {
     var result =
         claimRegistrationService.register(
-            registrationMapper.toCommand(request, reqId, inspId, txnId));
+            registrationMapper.toCommand(request, reqId, inspId, txnId, traceparent));
     var body = new RegisterClaimResponse(result.txnId(), result.replayed(), result.claimNum());
     // 201 for a real registration, 200 for a replay (nothing new was created).
     var status = result.replayed() ? HttpStatus.OK : HttpStatus.CREATED;
@@ -55,10 +56,11 @@ public class ClaimController {
       @RequestBody @Valid UpdateClaimStatusRequest request,
       @RequestHeader(HubHeaders.REQ_ID) String reqId,
       @RequestHeader(HubHeaders.INSP_ID) String inspId,
-      @RequestHeader(HubHeaders.TXN_ID) String txnId) {
+      @RequestHeader(HubHeaders.TXN_ID) String txnId,
+      @RequestHeader(value = "traceparent", required = false) String traceparent) {
     var result =
         claimStatusUpdateService.updateStatus(
-            statusUpdateMapper.toCommand(request, claimNum, reqId, inspId, txnId));
+            statusUpdateMapper.toCommand(request, claimNum, reqId, inspId, txnId, traceparent));
     var body = new UpdateClaimStatusResponse(result.txnId(), result.replayed(), result.claimNum());
     // Always 200 - a status update never creates anything, so there's no 200/201 split.
     return ResponseEntity.ok(body);

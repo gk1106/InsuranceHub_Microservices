@@ -11,6 +11,7 @@ public record RegisterClaimCommand(
     String reqId,
     String inspId,
     String txnId,
+    String traceparent,
     String policyNum,
     String claimNum,
     String claimType,

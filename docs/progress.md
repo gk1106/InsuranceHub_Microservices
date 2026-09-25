@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **6 — hub-gateway crypto done, awaiting review before phase 7**
+Current phase: **7 — outbox + Kafka events done, awaiting review before phase 8**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -11,7 +11,7 @@ Current phase: **6 — hub-gateway crypto done, awaiting review before phase 7**
 | 4 | claims-service 03 register + 04 status | Done |
 | 5 | hub-gateway: OAuth2, routing, mapping (crypto off in local) | Done (2 commits) |
 | 6 | hub-gateway crypto: JWS/JWE | Done |
-| 7 | Outbox + Kafka events | Not started |
+| 7 | Outbox + Kafka events | Done |
 | 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Not started |
 | 9 | AWS: Terraform + centralized logging/monitoring + GitLab CI deploy | Not started |
 
@@ -770,3 +770,63 @@ phase's new classes were still untracked (never committed) at review time.
 
 `./mvnw -pl hub-common,hub-gateway -am verify` green after all of the above: full phase 5 + phase
 6 crypto suite unaffected, plus every new/updated test the fixes above added.
+
+## Phase 7 notes — transactional outbox + Kafka events (policy-service, claims-service)
+
+hub-gateway untouched. Each service gets its own `outbox_event` table (Flyway `V2__outbox.sql`),
+appended to in the *same* local transaction as the business write (`PolicyCreated`,
+`PolicyRenewed`, `ClaimRegistered`, `ClaimStatusChanged`), and a `@Scheduled` relay (500ms,
+`FOR UPDATE SKIP LOCKED`) that publishes to Kafka and marks `published_at`. Full design reasoning
+lives in `docs/adr/0006-outbox-relay.md` - not duplicated here.
+
+**Investigated and reported before writing any code, per the phase-7 prompt's own request**: Boot
+4.1.1 auto-configures `tools.jackson.databind.ObjectMapper` (Jackson 3) for the REST layer, but
+spring-kafka's `JsonSerializer` is hard-bound to classic `com.fasterxml.jackson.databind.
+ObjectMapper` (Jackson 2) - confirmed by disassembling the actually-resolved jars, not by
+assumption. Rather than build a second, hand-configured Jackson-2 mapper and carry the ongoing
+risk of its date/module config drifting from the Jackson-3 one, `JsonSerializer` is never used at
+all: the event envelope is serialized to a JSON string exactly once (by the one Jackson-3 mapper
+every service already has), stored verbatim in `outbox_event.payload`, and published verbatim via
+`KafkaTemplate<String, String>` with Kafka's own `StringSerializer`. One serialization event, not
+two mappers configured to agree.
+
+Three real bugs found only once this actually ran against real infrastructure, not by inspection:
+- **Boot 4.1.1 split Kafka autoconfiguration into its own `spring-boot-kafka` artifact** (same
+  modularization pattern already hit for health/jackson/flyway/http-client) - declaring plain
+  `spring-kafka` compiles fine but leaves zero `KafkaTemplate` bean at runtime
+  (`NoSuchBeanDefinitionException` at context startup). Fixed by depending on
+  `spring-boot-starter-kafka` instead, which pulls in both.
+- **The relay's own `SELECT ... FOR UPDATE SKIP LOCKED` blocked concurrent business-transaction
+  inserts for exactly MySQL's default 50s `innodb_lock_wait_timeout`, then failed them** - caught
+  by `PolicyCoverageIT` (a completely unrelated test) suddenly timing out at exactly 50.10s.
+  Root cause: InnoDB's default `REPEATABLE READ` takes gap locks on the scanned index range even
+  when a locking read matches zero rows, blocking inserts into that same range from any other
+  transaction - the standard, well-documented `SKIP LOCKED` job-queue gotcha. Fixed with
+  `@Transactional(isolation = Isolation.READ_COMMITTED)` on the relay's poll-and-publish method
+  (plain record locks only). See the ADR for the full explanation.
+- **`org.testcontainers.kafka.KafkaContainer` (testcontainers-kafka 2.0.5) fails to start
+  `apache/kafka:3.9.0`** (the exact image docker-compose.yml pins for the real stack) - its
+  custom startup script exits 1 against that tag but starts cleanly against `4.1.0`. Verified via
+  a standalone reproduction outside the test suite before concluding it wasn't an environment
+  fluke. Test-only Kafka containers use `apache/kafka:4.1.0`; docker-compose.yml is unaffected
+  (its own default entrypoint, not Testcontainers' override script, works fine on `3.9.0`).
+
+`traceparent` is captured and restored (nullable column, pass-through via
+`@RequestHeader(value = "traceparent", required = false)` on every internal write endpoint) but
+nothing sends one yet - no tracing infrastructure exists until phase 8. Recorded as
+`docs/open-questions.md` Q15, not a silent gap.
+
+Tests (Kafka Testcontainer `*IT` + a mocked-`KafkaTemplate` unit test, both services): atomicity
+in-transaction and on rollback (`OutboxAppenderIT`, calling the service/appender directly so the
+rollback case can force a failure at a precise point inside the transaction); replay never
+double-appends; the relay publishes and marks `published_at`; a failed send increments `attempts`
+and a later run succeeds (`OutboxRelayTest`, mocked `KafkaTemplate` - deterministic, independent
+of a real broker's actual failure/recovery timing); one poison row never blocks the healthy rows
+around it in the same batch; a row past the alert threshold keeps retrying rather than being
+abandoned; two concurrent `relay()` invocations on the same bean never double-send
+(`OutboxRelayIT`, real Kafka, real concurrent transactions); the stored payload and the published
+message are byte-identical; the data block contains none of a fixture's real-looking PII values;
+same-aggregate events land on the same partition; `outbox_pending` tracks live DB state.
+
+`./mvnw -pl hub-common,policy-service,claims-service -am verify` green: full phase 2-4 suite
+unaffected, plus the new outbox suite in both services (4 unit + 3 + 6 IT each).

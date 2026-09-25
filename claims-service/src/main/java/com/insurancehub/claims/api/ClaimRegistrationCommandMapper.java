@@ -11,5 +11,5 @@ import org.mapstruct.Mapper;
 public interface ClaimRegistrationCommandMapper {
 
   RegisterClaimCommand toCommand(
-      RegisterClaimRequest request, String reqId, String inspId, String txnId);
+      RegisterClaimRequest request, String reqId, String inspId, String txnId, String traceparent);
 }

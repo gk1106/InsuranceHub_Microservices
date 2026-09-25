@@ -36,6 +36,7 @@ class ClaimStatusUpdateServiceTest {
   private ClaimRepository claims;
   private ClaimStatusHistoryRepository claimStatusHistory;
   private ProcessedRequestRepository processedRequests;
+  private OutboxAppender outboxAppender;
   private ClaimStatusUpdateService service;
 
   @BeforeEach
@@ -43,6 +44,7 @@ class ClaimStatusUpdateServiceTest {
     claims = mock(ClaimRepository.class);
     claimStatusHistory = mock(ClaimStatusHistoryRepository.class);
     processedRequests = mock(ProcessedRequestRepository.class);
+    outboxAppender = mock(OutboxAppender.class);
     ClaimStatusPolicy claimStatusPolicy =
         new ClaimStatusPolicy(
             Set.of("CLOSED", "REPUDIATED", "CANCELLED"),
@@ -52,7 +54,12 @@ class ClaimStatusUpdateServiceTest {
     when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
     service =
         new ClaimStatusUpdateService(
-            claims, claimStatusHistory, processedRequests, claimStatusPolicy, transactionManager);
+            claims,
+            claimStatusHistory,
+            processedRequests,
+            claimStatusPolicy,
+            outboxAppender,
+            transactionManager);
 
     when(claims.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
     when(claimStatusHistory.save(any(ClaimStatusHistory.class)))
@@ -187,6 +194,7 @@ class ClaimStatusUpdateServiceTest {
         REQ_ID,
         INSP_ID,
         TXN_ID,
+        null, // traceparent
         CLAIM_NUM,
         POLICY_NUM,
         claimStatus,
