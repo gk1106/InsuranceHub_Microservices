@@ -1,0 +1,20 @@
+# Provider plugin cache and any local/remote state - never commit real infra state or the
+# secrets that can appear in it (RDS passwords, Cognito client secrets, etc.).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Real variable values - environments/*/terraform.tfvars.example is the checked-in template.
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+.terraformrc
+terraform.rc

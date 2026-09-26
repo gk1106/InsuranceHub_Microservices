@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (git-ignored) and fill in real values. Never commit terraform.tfvars.
+# Set up the S3 + DynamoDB remote backend (versions.tf's commented backend block) before the
+# first `terraform init` here - see infra/terraform/README.md.
+
+aws_region = "ap-south-1"
+
+acm_certificate_arn = "arn:aws:acm:ap-south-1:123456789012:certificate/REPLACE-ME"
+
+log_reader_trusted_principal_arn = "arn:aws:iam::123456789012:user/REPLACE-ME"
+
+alert_email = "you@example.com"
+
+image_tags = {
+  hub-gateway    = "REPLACE-ME-git-sha"
+  policy-service = "REPLACE-ME-git-sha"
+  claims-service = "REPLACE-ME-git-sha"
+}

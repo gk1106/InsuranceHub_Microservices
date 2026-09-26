@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars (git-ignored - see infra/terraform/.gitignore) and fill in real
+# values before running plan/apply. Never commit terraform.tfvars itself.
+
+aws_region = "ap-south-1"
+
+# Must already be issued and DNS-validated in ACM for a domain you own.
+acm_certificate_arn = "arn:aws:acm:ap-south-1:123456789012:certificate/REPLACE-ME"
+
+# Your own IAM user/role ARN, so you can assume the log-reader role for Logs Insights queries.
+log_reader_trusted_principal_arn = "arn:aws:iam::123456789012:user/REPLACE-ME"
+
+alert_email = "you@example.com"
+
+# Each ECR repo is IMMUTABLE-tagged, so it needs at least one image pushed under this exact tag
+# before the first apply - see infra/terraform/README.md's bootstrap order.
+image_tags = {
+  hub-gateway    = "REPLACE-ME-git-sha"
+  policy-service = "REPLACE-ME-git-sha"
+  claims-service = "REPLACE-ME-git-sha"
+}

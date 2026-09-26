@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: **8 — hardening done, awaiting review before phase 9**
+Current phase: **9 — Terraform + CI deploy wiring written, NOT yet applied to a real AWS account**
 
 | Phase | Goal | Status |
 |---|---|---|
@@ -13,7 +13,7 @@ Current phase: **8 — hardening done, awaiting review before phase 9**
 | 6 | hub-gateway crypto: JWS/JWE | Done |
 | 7 | Outbox + Kafka events | Done |
 | 8 | Hardening: resilience, structured logs, tracing, metrics, Dockerfiles | Done |
-| 9 | AWS: Terraform + centralized logging/monitoring + GitLab CI deploy | Not started |
+| 9 | AWS: Terraform + centralized logging/monitoring + GitLab CI deploy | Code written, not yet applied |
 
 ## Phase 0 notes
 
@@ -938,3 +938,70 @@ above, both caught once verification was done properly): hub-common 75 unit, hub
 **Manually verified against the real stack**: not yet done this phase (compose-based trace
 verification in Grafana / `jq`-piped JSON log inspection, per the plan's own verification
 section) - recommended before phase 9, not blocking this review.
+
+## Phase 9 notes — AWS: Terraform + centralized logging/monitoring + GitLab CI deploy
+
+**Written and locally validated this phase; not applied to a real AWS account.** This machine
+had no Terraform CLI and an expired AWS CLI session at the start of the phase (installed
+Terraform 1.16.2 via winget specifically to run `terraform validate`); a real `apply` needs the
+developer's own live AWS credentials, which weren't available this session, and
+`testing-and-deploy.md` itself says to review `terraform plan` before any `apply` regardless.
+Full design reasoning and every known gap: `docs/adr/0009-aws-topology.md` (not duplicated here).
+
+`infra/terraform/` now has ten reusable modules (network, kms, ecr, secrets, rds, ecs, alb,
+kafka-self-managed, kafka-msk, observability, gitlab-oidc) and three root environments (`dev`,
+`prod`, `shared` - the one-time account-level GitLab OIDC provider + deploy roles). `dev` and
+`prod` are separate Terraform states on purpose. `infra/terraform/README.md` has the bootstrap
+order.
+
+**Cost-conscious defaults, each reversible via one variable** (ADR-0009 has the full reasoning):
+self-managed single-node Kafka on ECS Fargate + EFS (`kafka_mode = "self_managed"`, MSK also
+built as a real alternative module), a single NAT gateway in both dev and prod, Cognito instead
+of a self-hosted Keycloak ECS service + its own RDS instance.
+
+**Secrets reach ECS tasks via the native `secrets` container-definition field** (execution-role
+Secrets Manager reads), not Spring Cloud AWS's own runtime `spring.config.import=
+optional:aws-secretsmanager:...` fetch that `cross-cutting.md` §3 describes - a deliberate
+simplification needing zero new Spring dependencies (ADR-0009).
+
+Three real bugs found by `terraform validate` (not by inspection) before this ever reached a
+live account:
+- AWS security group rule `description` fields reject the `->` arrow character entirely (a
+  regex constraint) - every "X -> Y" description in `modules/network` was invalid; changed to
+  "X to Y".
+- `aws_s3_bucket_lifecycle_configuration` now requires an explicit `filter {}` block per rule (a
+  provider warning en route to becoming a hard error) - added.
+- `data.aws_region.current.region` doesn't exist on this project's actually-resolved AWS
+  provider version (5.100.0); the real attribute is `.name` - found by validate, not assumed.
+
+Also found and fixed **before** it became a hand-wavy `jsonencode` guess: no AWS managed
+CloudWatch Logs data-protection identifier covers Indian phone numbers or Indian bank/loan
+account numbers (only BR/DE/ES/FR/GB/IT/US variants exist for phone numbers and bank account
+numbers - confirmed by fetching AWS's own published identifier ARN list directly, not from
+memory). `modules/observability`'s PII protection policy uses custom regex identifiers for
+`cif`/`accountNum`/`loanAcctNum`/`mobileNum` instead - exactly what
+`logging-and-monitoring.md` §5 itself already said to do, just not something to get away with
+guessing the wrong managed-identifier name for first.
+
+`modules/observability` covers logging-and-monitoring.md §11's Terraform checklist: KMS-encrypted
+log groups (a standalone `modules/kms`, kept separate to avoid a circular module dependency with
+`modules/ecs`'s own log groups), all six named Logs Insights saved queries verbatim, the five
+named metric filters + prod-only alarms plus an `outbox_pending` alarm on the phase-7 gauge, an
+SNS topic, a dashboard, the ALB access-log S3 bucket (moved into `modules/alb` itself to avoid a
+second circular dependency with observability's own 5xx alarm), and a scoped log-reader IAM role
+with no `logs:Unmask` grant.
+
+`.gitlab-ci.yml`'s `publish`/`deploy-dev`/`deploy-prod` stages are wired for real: GitLab OIDC →
+a short-lived AWS role (no long-lived AWS keys in CI variables), `publish` builds+pushes all
+three images to ECR, `deploy-dev`/`deploy-prod` redeploy each ECS service via a shared
+`infra/terraform/scripts/deploy-ecs-service.sh` (register a new task definition revision with the
+new image, update the service, wait for stability) - `deploy-prod` promotes the exact same
+image tag `deploy-dev` already validated, never rebuilding.
+
+Not done, called out rather than silently assumed: `hub.crypto.bank-keys[0].private-key-path`
+still expects a file path, not the raw PEM an ECS-injected secret env var provides (an
+application-code change, out of scope for a Terraform-only phase); RDS schema/user creation is a
+manual one-time script, not Terraform-managed (a private-subnet RDS instance isn't reachable
+from a developer's machine or a CI runner to run SQL against); Spring relaxed-binding env var
+names in the task definitions and the GitLab OIDC trust policy's `sub` claim match are both
+written from current documentation but never verified against a real running deployment.

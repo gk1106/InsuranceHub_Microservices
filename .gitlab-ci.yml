@@ -54,6 +54,11 @@ trivy-scan:
     # accepted, per this job's own convention.
     - trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore .
 
+# Build-only, fast-feedback: fails on a broken Dockerfile/build well before the pipeline ever
+# reaches publish/deploy. Not the build that actually ships - `publish` rebuilds (Docker's own
+# layer cache makes the second build cheap) and pushes to ECR, since a Docker image built in
+# this job's own docker:27-dind service doesn't exist in publish's separate dind service - GitLab
+# CI jobs don't share a Docker daemon, even back-to-back in the same pipeline.
 package:
   stage: package
   image: docker:27
@@ -78,24 +83,77 @@ package:
     - docker build -f policy-service/Dockerfile -t policy-service:$CI_COMMIT_SHORT_SHA .
     - docker build -f claims-service/Dockerfile -t claims-service:$CI_COMMIT_SHORT_SHA .
 
+# Shared by publish/deploy-dev/deploy-prod: exchange GitLab's own short-lived OIDC token for
+# temporary AWS credentials (infra/terraform/modules/gitlab-oidc - "no long-lived AWS keys in CI
+# variables", testing-and-deploy.md §4). $AWS_ROLE_ARN is set per-job below; the trust policy
+# itself restricts which role a given branch/environment may actually assume. All three jobs use
+# the same docker:27 (Alpine) base image, even the two that never touch Docker themselves -
+# consistency here means one apk-based before_script works everywhere, rather than juggling a
+# different package manager (yum/microdnf) on a second base image for no real benefit.
+.assume_aws_role:
+  image: docker:27
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://sts.amazonaws.com
+  before_script:
+    - apk add --no-cache aws-cli jq bash
+    - |
+      CREDS=$(aws sts assume-role-with-web-identity \
+        --role-arn "${AWS_ROLE_ARN}" \
+        --role-session-name "gitlab-${CI_PIPELINE_ID}" \
+        --web-identity-token "${GITLAB_OIDC_TOKEN}" \
+        --duration-seconds 3600 \
+        --query 'Credentials' --output json)
+      export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .AccessKeyId)
+      export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .SecretAccessKey)
+      export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .SessionToken)
+
 publish:
   stage: publish
-  image: docker:27
+  extends: .assume_aws_role
   services:
     - docker:27-dind
+  variables:
+    # publish always targets the dev account/registry; deploy-prod promotes the exact same
+    # image by tag afterwards, it never rebuilds - see that job's own comment.
+    AWS_ROLE_ARN: $AWS_ROLE_ARN_DEV
+    AWS_DEFAULT_REGION: ap-south-1
   script:
-    # Push to ECR via GitLab OIDC -> AWS IAM role. No long-lived AWS keys in CI variables.
-    - echo "publish: wired up in phase 9 (Terraform + OIDC role)"
+    - ECR_REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+    - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+    - |
+      for svc in hub-gateway policy-service claims-service; do
+        docker build -f ${svc}/Dockerfile -t ${ECR_REGISTRY}/insurancehub-${svc}:${CI_COMMIT_SHORT_SHA} .
+        docker push ${ECR_REGISTRY}/insurancehub-${svc}:${CI_COMMIT_SHORT_SHA}
+      done
 
 deploy-dev:
   stage: deploy-dev
+  extends: .assume_aws_role
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN_DEV
+    AWS_DEFAULT_REGION: ap-south-1
   script:
-    - echo "deploy-dev: wired up in phase 9"
+    - ECR_REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+    - |
+      for svc in hub-gateway policy-service claims-service; do
+        bash infra/terraform/scripts/deploy-ecs-service.sh dev ${svc} ${ECR_REGISTRY}/insurancehub-${svc}:${CI_COMMIT_SHORT_SHA}
+      done
 
 deploy-prod:
   stage: deploy-prod
+  extends: .assume_aws_role
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN_PROD
+    AWS_DEFAULT_REGION: ap-south-1
   when: manual
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:
-    - echo "deploy-prod: wired up in phase 9"
+    # Same image tag dev already validated - promoted between accounts/registries, never
+    # rebuilt, so what runs in prod is byte-identical to what ran in dev.
+    - ECR_REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+    - |
+      for svc in hub-gateway policy-service claims-service; do
+        bash infra/terraform/scripts/deploy-ecs-service.sh prod ${svc} ${ECR_REGISTRY}/insurancehub-${svc}:${CI_COMMIT_SHORT_SHA}
+      done
